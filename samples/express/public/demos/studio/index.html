@@ -3,45 +3,129 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Perxona Connect Kit — Studio</title>
+    <title>LifeStack AI Avatar</title>
     <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="theme.css" />
   </head>
   <body>
+    <!-- ── App header ────────────────────────────────────────────────── -->
+    <!-- Lives above #app (not inside .sidebar) so the sidebar-collapse
+         control and theme switcher stay reachable no matter the sidebar's
+         collapsed/expanded state. -->
+    <header class="app-header">
+      <div class="app-header-brand">
+        <p class="brand">LifeStack</p>
+        <p class="demo-label">AI Avatar</p>
+      </div>
+      <div class="app-header-controls">
+        <button
+          type="button"
+          id="sidebar-collapse-btn"
+          class="icon-btn"
+          title="Collapse sidebar"
+          aria-label="Collapse sidebar"
+        >
+          ☰
+        </button>
+        <label class="theme-picker">
+          <span class="theme-picker-label">Theme</span>
+          <select id="theme-select" aria-label="Theme"></select>
+        </label>
+      </div>
+    </header>
+
     <div id="app">
       <!-- ── Sidebar ─────────────────────────────────────────────────── -->
       <aside class="sidebar">
         <div class="sidebar-inner">
-          <p class="brand">Perxona Connect Kit</p>
-          <p class="demo-label">Studio Demo</p>
-
           <!-- ── Presenter setup ──────────────────────────────────────── -->
           <section class="sidebar-section">
             <p class="section-label">Presenter Setup</p>
             <div class="field-group">
-              <label class="field">
+              <div class="field">
                 <span>Avatar</span>
-                <div class="select-row">
+                <!--
+                  Carousel is what the user sees and clicks; the <select>
+                  below stays in the DOM (hidden) as the actual state — every
+                  avatarSelect.value read and change-listener elsewhere in
+                  app.js still targets it unchanged. Carousel clicks just set
+                  its value and dispatch "change", same as a real picker.
+                -->
+                <div class="carousel" id="avatar-carousel">
+                  <button
+                    type="button"
+                    class="carousel-nav carousel-prev"
+                    aria-label="Previous avatar"
+                  >
+                    ‹
+                  </button>
+                  <div
+                    class="carousel-track"
+                    id="avatar-carousel-track"
+                    role="listbox"
+                    aria-label="Avatar"
+                  ></div>
+                  <button
+                    type="button"
+                    class="carousel-nav carousel-next"
+                    aria-label="Next avatar"
+                  >
+                    ›
+                  </button>
+                </div>
+                <div class="select-row" hidden>
                   <img id="avatar-icon" class="asset-icon" alt="" hidden />
                   <select id="avatar-select">
                     <option value="">— loading —</option>
                   </select>
                 </div>
-              </label>
-              <label class="field">
+              </div>
+              <div class="field">
                 <span>Scene</span>
-                <div class="select-row">
+                <div class="carousel" id="scene-carousel">
+                  <button
+                    type="button"
+                    class="carousel-nav carousel-prev"
+                    aria-label="Previous scene"
+                  >
+                    ‹
+                  </button>
+                  <div
+                    class="carousel-track"
+                    id="scene-carousel-track"
+                    role="listbox"
+                    aria-label="Scene"
+                  ></div>
+                  <button
+                    type="button"
+                    class="carousel-nav carousel-next"
+                    aria-label="Next scene"
+                  >
+                    ›
+                  </button>
+                </div>
+                <div class="select-row" hidden>
                   <img id="scene-icon" class="asset-icon" alt="" hidden />
                   <select id="scene-select">
                     <option value="">— loading —</option>
                   </select>
                 </div>
-              </label>
-              <label class="field">
+              </div>
+              <div class="field">
                 <span>Voice</span>
-                <select id="voice-select">
+                <p class="field-hint">
+                  Hover a voice to hear it say a preview line.
+                </p>
+                <ul
+                  class="voice-list"
+                  id="voice-list"
+                  role="listbox"
+                  aria-label="Voice"
+                ></ul>
+                <select id="voice-select" hidden>
                   <option value="">— loading —</option>
                 </select>
-              </label>
+              </div>
             </div>
             <button id="init-btn" disabled>Launch Presenter</button>
             <p id="status-msg" class="status"></p>
@@ -281,12 +365,155 @@
       <main class="main">
         <!-- Presenter stage -->
         <div class="stage">
+          <!-- ── Stage toolbar ───────────────────────────────────────── -->
+          <!-- Lives INSIDE .stage (not as a sibling row above it) so it can
+               overlay the avatar viewport instead of permanently reserving
+               its own layout row — hidden by default, revealed only while
+               hovering .stage (see .stage:hover .stage-toolbar in
+               style.css). Being a child of .stage means :hover naturally
+               stays true while the pointer moves onto the toolbar itself
+               (hovering a descendant keeps the ancestor's :hover), so no JS
+               is needed to prevent flicker crossing that boundary. Each
+               toggle reuses the exact "Conversation text" toggle-switch
+               pattern (.toggle-row / .toggle-switch / .toggle-slider) — see
+               the one near the chat input below. Avatar/Scene/Voice/Text
+               wire to real targets in app.js (renderPersistentStageOverlay,
+               presenter.muteAudio, and the shared text-visibility state);
+               Timeline shows/hides the Conversation Timeline panel. -->
+          <div class="stage-toolbar">
+            <div class="toggle-row stage-toggle">
+              <span class="toggle-row-label">Avatar</span>
+            <label class="toggle-switch" title="Show/hide avatar">
+              <input
+                type="checkbox"
+                id="stage-toggle-avatar"
+                checked
+                aria-label="Avatar visibility on/off"
+              />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row stage-toggle">
+            <span class="toggle-row-label">Scene</span>
+            <label class="toggle-switch" title="Show/hide scene">
+              <input
+                type="checkbox"
+                id="stage-toggle-scene"
+                checked
+                aria-label="Scene visibility on/off"
+              />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row stage-toggle">
+            <span class="toggle-row-label">Voice</span>
+            <label class="toggle-switch" title="Mute/unmute voice">
+              <input
+                type="checkbox"
+                id="stage-toggle-voice"
+                checked
+                aria-label="Voice mute on/off"
+              />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row stage-toggle">
+            <span class="toggle-row-label">Text</span>
+            <label class="toggle-switch" title="Show/hide conversation text">
+              <input
+                type="checkbox"
+                id="stage-toggle-text"
+                checked
+                aria-label="Text visibility on/off"
+              />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row stage-toggle">
+            <span class="toggle-row-label">Timeline</span>
+            <label
+              class="toggle-switch"
+              title="Show/hide the timeline panel"
+            >
+              <input
+                type="checkbox"
+                id="stage-toggle-timeline"
+                aria-label="Timeline visibility on/off"
+              />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          </div>
+
+          <!-- ── Motion picker + framing controls ─────────────────────── -->
+          <!-- Persistent (not hover-gated like the toolbar above) — floats
+               top-right of .stage. Motion list is real, fetched from the
+               existing GET /api/avatars/:id/motions proxy (previously
+               unused by the frontend — see server.mjs); triggering reuses
+               presenter.playMotion(), logged through appendDebug() exactly
+               like every other presenter command in this file. -->
+          <div class="stage-controls">
+            <div class="motion-picker" id="motion-picker">
+              <button
+                type="button"
+                id="motion-picker-toggle"
+                class="stage-float-btn"
+                title="Motions"
+                aria-label="Open motion picker"
+                aria-haspopup="listbox"
+                aria-expanded="false"
+              >
+                Motion
+              </button>
+              <div
+                id="motion-picker-popup"
+                class="motion-picker-popup"
+                hidden
+              >
+                <p class="motion-picker-title">Motions</p>
+                <ul
+                  id="motion-picker-list"
+                  class="motion-picker-list"
+                  role="listbox"
+                  aria-label="Motions"
+                ></ul>
+              </div>
+            </div>
+            <select
+              id="framing-select"
+              class="framing-select"
+              aria-label="Avatar framing"
+              title="Avatar framing"
+            >
+              <option value="mid">Mid</option>
+              <option value="full">Full</option>
+              <option value="face">Face</option>
+            </select>
+          </div>
+
           <div id="stage-placeholder" class="placeholder">
             <p>
               Select an avatar &amp; scene,<br />then click Launch Presenter.
             </p>
           </div>
           <sv-presenter hidden style="width: 100%; height: 100%"></sv-presenter>
+
+          <!-- ── Hover preview overlay ─────────────────────────────────── -->
+          <!-- A fast static image swap (not a real presenter launch) shown
+               only while hovering an avatar/scene carousel card — see
+               showHoverPreview()/hideHoverPreview() in app.js. Sits above
+               both the placeholder and <sv-presenter> and, on mouseleave,
+               is simply hidden again to reveal whichever of those two was
+               already underneath. -->
+          <div id="hover-preview" class="hover-preview" hidden>
+            <img id="hover-preview-scene" class="hover-preview-scene" alt="" />
+            <img
+              id="hover-preview-avatar"
+              class="hover-preview-avatar"
+              alt=""
+            />
+            <p id="hover-preview-label" class="hover-preview-label"></p>
+          </div>
 
           <!-- ── Debug timeline panel ─────────────────────────────────── -->
           <!-- Shows the full lifecycle of each chat turn: user message →
@@ -305,6 +532,20 @@
             </div>
             <ol id="debug-log" class="debug-log"></ol>
           </div>
+
+          <!-- ── Stage listening HUD ───────────────────────────────────── -->
+          <div id="stage-listening-hud" class="stage-listening-hud" hidden>
+            <span class="stage-hud-pulse"></span>
+            <span class="stage-hud-icon">🎙️</span>
+            <div class="stage-hud-bars" aria-hidden="true">
+              <span class="hud-bar bar-1"></span>
+              <span class="hud-bar bar-2"></span>
+              <span class="hud-bar bar-3"></span>
+              <span class="hud-bar bar-4"></span>
+              <span class="hud-bar bar-5"></span>
+            </div>
+            <span id="stage-hud-text" class="stage-hud-text">Listening…</span>
+          </div>
         </div>
 
         <!-- Chat area -->
@@ -315,17 +556,92 @@
             </p>
           </div>
           <div id="chat-content" class="chat-content" hidden>
-            <!-- Always visible while chatting: without it the two sources are
-                 indistinguishable once the sidebar scrolls out of view. -->
-            <p class="active-source">
+            <!-- Hidden from view — the stage toolbar's "Text" toggle already
+                 controls this same #text-visibility-toggle checkbox (see
+                 app.js), so hiding this duplicate loses no functionality. -->
+            <p class="active-source" hidden>
               Answering with <strong id="active-source-label"></strong>
             </p>
             <div id="chat-log" class="chat-log"></div>
+            <div class="toggle-row" hidden>
+              <span class="toggle-row-label">Conversation text</span>
+              <label class="toggle-switch" title="Show/hide conversation text">
+                <input
+                  type="checkbox"
+                  id="text-visibility-toggle"
+                  checked
+                  aria-label="Text visibility on/off"
+                />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="persona-buttons" id="persona-chips">
+              <button
+                type="button"
+                class="persona-btn"
+                data-persona="cloud"
+                title="Switch to Senior Cloud Architect"
+              >
+                Cloud Architect
+              </button>
+              <button
+                type="button"
+                class="persona-btn"
+                data-persona="driving"
+                title="Switch to Interactive Driving Instructor"
+              >
+                Driving Instruction
+              </button>
+              <button
+                type="button"
+                class="persona-btn"
+                data-persona="equity"
+                title="Switch to Real-Time Equity Analyst"
+              >
+                Equity Analyst
+              </button>
+            </div>
+
+            <!-- ── Audio Listening Animation Panel ───────────────────────── -->
+            <div id="audio-listening-panel" class="audio-listening-panel" hidden>
+              <div class="listening-anim-content">
+                <div class="listening-pulse-indicator">
+                  <span class="pulse-ring"></span>
+                  <span class="pulse-dot"></span>
+                </div>
+                <div class="audio-wave-bars" id="audio-wave-bars" aria-hidden="true">
+                  <span class="wave-bar bar-1"></span>
+                  <span class="wave-bar bar-2"></span>
+                  <span class="wave-bar bar-3"></span>
+                  <span class="wave-bar bar-4"></span>
+                  <span class="wave-bar bar-5"></span>
+                  <span class="wave-bar bar-6"></span>
+                  <span class="wave-bar bar-7"></span>
+                  <span class="wave-bar bar-8"></span>
+                  <span class="wave-bar bar-9"></span>
+                </div>
+                <div class="listening-label-group">
+                  <span id="listening-status-text" class="listening-status-text">Listening…</span>
+                  <span id="listening-interim-text" class="listening-interim-text">Speak naturally</span>
+                </div>
+              </div>
+            </div>
+
             <form id="chat-form" class="chat-input-row">
+              <button
+                type="button"
+                id="live-mode-btn"
+                class="live-mode-btn"
+                title="Toggle hands-free Live Conversation mode"
+                aria-label="Toggle hands-free Live Conversation mode"
+              >
+                <span class="live-dot"></span>
+                <span class="live-text">Live Mode</span>
+              </button>
               <input
                 id="chat-input"
                 type="text"
-                placeholder="Ask the chatbot…"
+                placeholder="Ask your Cloud Architect, Driving Instructor, or Equity Analyst…"
                 autocomplete="off"
               />
               <button

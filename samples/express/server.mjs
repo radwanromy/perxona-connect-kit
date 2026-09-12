@@ -273,6 +273,30 @@ const connectApi = {
     return upstreamJson(r, "scene detail");
   },
 
+  // Provider-specific synthesis config for one voice (endpoint_url, native
+  // voice name, region/audio config) — see synthesizeVoicePreview() below,
+  // the only caller. Distinct from voices() above, which lists the catalog.
+  async voiceDetail(id, credential) {
+    const r = await callUpstream(
+      `/api/v1/connect/voices/${encodeURIComponent(id)}`,
+      {},
+      credential,
+    );
+    return upstreamJson(r, "voice detail");
+  },
+
+  // Short-lived bearer token scoped to this one voice's underlying provider
+  // (Azure Speech or Google Cloud TTS) — used directly against that
+  // provider's own REST API, never against PERXONA_API_BASE_URL.
+  async voicePreviewToken(voiceId, credential) {
+    const r = await callUpstream(
+      "/api/v1/connect/voice-tokens/tts",
+      { method: "POST", body: JSON.stringify({ voice_id: voiceId }) },
+      credential,
+    );
+    return upstreamJson(r, "voice preview token");
+  },
+
   // ── Chatbot CRUD ──────────────────────────────────────────────────────────
   //
   // Create/update use multipart/form-data because the upstream supports an
@@ -695,6 +719,113 @@ app.get(
   route(async (req, res) => {
     const id = encodeURIComponent(req.params.id);
     res.json(await api.scene(id, CONNECT_SECRET_KEY));
+  }),
+);
+
+// ── Voice preview (TTS) ──────────────────────────────────────────────────────
+//
+// Studio's voice list plays a short, fixed phrase on hover so you can hear a
+// voice before picking it. The Connect catalog has no pre-recorded sample
+// clips (see ConnectVoiceResponse in docs/openapi.yaml) — this synthesizes it
+// for real, on the fly, using the same voice-tokens/tts endpoint the widget
+// itself would use, then calls that voice's actual provider directly.
+//
+// Every voice in this sample's own account is azure or google; those are the
+// two implemented here (verified against the live API — see voice detail's
+// endpoint_url/voice/audio_config fields). aws and elevenlabs appear in the
+// Connect API's provider enum but weren't reachable to test a real request
+// against, so they 501 rather than guessing at an unverified shape.
+const VOICE_PREVIEW_TEXT = "Hello, how are you?";
+
+async function synthesizeGooglePreview(detail, credential) {
+  const { token } = await api.voicePreviewToken(detail.id, credential);
+  const r = await fetch(detail.endpoint_url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      input: { text: VOICE_PREVIEW_TEXT },
+      // The preview phrase is always this fixed English sentence, and
+      // languageCode isn't part of the voice detail response, so it's fixed
+      // here too rather than derived from the voice's (often multi-language)
+      // `languages` list.
+      voice: {
+        languageCode: "en-US",
+        name: detail.voice.name,
+        model_name: detail.voice.model_name,
+      },
+      audioConfig: detail.audio_config,
+    }),
+  });
+  if (!r.ok) {
+    throw Object.assign(new Error("Google TTS synthesis failed"), {
+      status: 502,
+      payload: await r.json().catch(() => ({})),
+    });
+  }
+  const { audioContent } = await r.json();
+  return Buffer.from(audioContent, "base64");
+}
+
+async function synthesizeAzurePreview(detail, credential) {
+  const { token } = await api.voicePreviewToken(detail.id, credential);
+  // detail.endpoint_url is empty for Azure — the REST endpoint is derived
+  // from `region` instead, following Azure Speech's standard convention.
+  const ssml =
+    `<speak version='1.0' xml:lang='en-US'>` +
+    `<voice xml:lang='en-US' name='${detail.voice.name}'>${VOICE_PREVIEW_TEXT}</voice>` +
+    `</speak>`;
+  const r = await fetch(
+    `https://${detail.region}.tts.speech.microsoft.com/cognitiveservices/v1`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/ssml+xml",
+        "X-Microsoft-OutputFormat": "audio-16khz-32kbitrate-mono-mp3",
+        "User-Agent": "perxona-connect-kit-studio",
+      },
+      body: ssml,
+    },
+  );
+  if (!r.ok) {
+    throw Object.assign(new Error("Azure TTS synthesis failed"), {
+      status: 502,
+      payload: { error: await r.text() },
+    });
+  }
+  return Buffer.from(await r.arrayBuffer());
+}
+
+// POST /api/voices/:id/preview → audio/mpeg body (not JSON — the audio itself).
+// No request body: the phrase is fixed, so there is nothing for the browser
+// to supply beyond the voice id already in the path.
+app.post(
+  "/api/voices/:id/preview",
+  route(async (req, res) => {
+    if (USE_MOCK) {
+      res
+        .status(501)
+        .json({ error: "Voice preview is not available in mock mode." });
+      return;
+    }
+    const id = req.params.id;
+    const detail = await api.voiceDetail(id, CONNECT_SECRET_KEY);
+    let audio;
+    if (detail.provider === "google") {
+      audio = await synthesizeGooglePreview(detail, CONNECT_SECRET_KEY);
+    } else if (detail.provider === "azure") {
+      audio = await synthesizeAzurePreview(detail, CONNECT_SECRET_KEY);
+    } else {
+      res.status(501).json({
+        error: `Voice preview isn't implemented for provider "${detail.provider}" yet.`,
+      });
+      return;
+    }
+    res.set("Content-Type", "audio/mpeg");
+    res.send(audio);
   }),
 );
 

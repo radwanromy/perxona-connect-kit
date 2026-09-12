@@ -65,6 +65,39 @@ const initBtn = document.getElementById("init-btn");
 const statusMsg = document.getElementById("status-msg");
 const stagePlaceholder = document.getElementById("stage-placeholder");
 
+// Avatar/scene carousels + voice list — the visible pickers. avatarSelect/
+// sceneSelect/voiceSelect above stay the real state; these just drive them.
+const avatarCarousel = document.getElementById("avatar-carousel");
+const avatarCarouselTrack = document.getElementById("avatar-carousel-track");
+const sceneCarousel = document.getElementById("scene-carousel");
+const sceneCarouselTrack = document.getElementById("scene-carousel-track");
+const voiceListEl = document.getElementById("voice-list");
+const hoverPreview = document.getElementById("hover-preview");
+const hoverPreviewScene = document.getElementById("hover-preview-scene");
+const hoverPreviewAvatar = document.getElementById("hover-preview-avatar");
+const hoverPreviewLabel = document.getElementById("hover-preview-label");
+const textVisibilityToggle = document.getElementById(
+  "text-visibility-toggle",
+);
+
+// Header: theme switcher + sidebar collapse
+const themeSelect = document.getElementById("theme-select");
+const sidebarCollapseBtn = document.getElementById("sidebar-collapse-btn");
+const sidebarEl = document.querySelector(".sidebar");
+
+// Stage toolbar toggles
+const stageToggleAvatar = document.getElementById("stage-toggle-avatar");
+const stageToggleScene = document.getElementById("stage-toggle-scene");
+const stageToggleVoice = document.getElementById("stage-toggle-voice");
+const stageToggleText = document.getElementById("stage-toggle-text");
+const stageToggleTimeline = document.getElementById("stage-toggle-timeline");
+
+// Motion picker + framing select
+const motionPickerToggle = document.getElementById("motion-picker-toggle");
+const motionPickerPopup = document.getElementById("motion-picker-popup");
+const motionPickerList = document.getElementById("motion-picker-list");
+const framingSelect = document.getElementById("framing-select");
+
 // Chatbot manager — custom bot picker (replaces native <select> to avoid
 // Chrome's native-dropdown misposition bug inside scrolled overflow containers)
 const botPickerBtn = document.getElementById("bot-picker-btn");
@@ -117,6 +150,13 @@ const chatSendBtn = document.getElementById("chat-send-btn");
 const chatStopBtn = document.getElementById("chat-stop-btn");
 const micBtn = document.getElementById("mic-btn");
 const micStatus = document.getElementById("mic-status");
+const personaChips = document.getElementById("persona-chips");
+const liveModeBtn = document.getElementById("live-mode-btn");
+const audioListeningPanel = document.getElementById("audio-listening-panel");
+const listeningStatusText = document.getElementById("listening-status-text");
+const listeningInterimText = document.getElementById("listening-interim-text");
+const stageListeningHud = document.getElementById("stage-listening-hud");
+const stageHudText = document.getElementById("stage-hud-text");
 
 // Source switch
 const sourceRadios = document.querySelectorAll('input[name="source"]');
@@ -124,6 +164,75 @@ const sourceOwnRadio = document.getElementById("source-own");
 const sourceOwnHint = document.getElementById("source-own-hint");
 const sourceLabel = document.getElementById("active-source-label");
 const chatbotManager = document.getElementById("chatbot-manager");
+
+// ── Theming ──────────────────────────────────────────────────────────────
+//
+// One data-theme attribute on <html> drives everything via CSS custom
+// properties — style.css's :root is "Normal" (unchanged, the default);
+// theme.css layers the other four as [data-theme="…"] overrides. Adding a
+// 6th theme later is exactly one more entry here plus one more CSS block in
+// theme.css — no component needs to know theme names.
+const THEMES = [
+  { id: "normal", label: "Normal" },
+  { id: "day", label: "Day" },
+  { id: "night", label: "Night" },
+  { id: "mild", label: "Mild" },
+  { id: "compact", label: "Compact" },
+];
+const THEME_STORAGE_KEY = "studio.theme";
+
+function applyTheme(id) {
+  document.documentElement.dataset.theme = id;
+  localStorage.setItem(THEME_STORAGE_KEY, id);
+}
+
+themeSelect.replaceChildren(
+  ...THEMES.map(({ id, label }) =>
+    Object.assign(document.createElement("option"), {
+      value: id,
+      textContent: label,
+    }),
+  ),
+);
+// Default theme is "day" — a user's own choice (once stored) still wins on
+// every later load; this only decides what a fresh browser starts on.
+const storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+const initialTheme = THEMES.some((t) => t.id === storedTheme)
+  ? storedTheme
+  : "day";
+themeSelect.value = initialTheme;
+applyTheme(initialTheme);
+themeSelect.addEventListener("change", () => applyTheme(themeSelect.value));
+
+// ── Collapsible sidebar ──────────────────────────────────────────────────
+//
+// .sidebar's own width (not the #app grid track, which is just "auto") is
+// what's animated — see style.css. The button lives in the always-visible
+// app header, not inside .sidebar, so it's reachable in both states; it
+// doubles as both collapse and expand, just relabeling itself.
+const SIDEBAR_STORAGE_KEY = "studio.sidebarCollapsed";
+
+function setSidebarCollapsed(collapsed) {
+  sidebarEl.classList.toggle("collapsed", collapsed);
+  sidebarCollapseBtn.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+  sidebarCollapseBtn.setAttribute(
+    "aria-label",
+    collapsed ? "Expand sidebar" : "Collapse sidebar",
+  );
+  localStorage.setItem(SIDEBAR_STORAGE_KEY, String(collapsed));
+  // The stage's own width just changed (the sidebar's width transition is
+  // what actually drives that, over ~0.22s — see style.css), but the
+  // presenter's internal canvas has been seen not always picking up a
+  // container resize on its own. A window "resize" event is the generic
+  // signal most canvas/WebGL widgets listen for to recompute their size;
+  // firing one after the transition finishes nudges it to match the stage's
+  // new dimensions instead of possibly still rendering at the old ones.
+  window.setTimeout(() => window.dispatchEvent(new Event("resize")), 240);
+}
+sidebarCollapseBtn.addEventListener("click", () => {
+  setSidebarCollapsed(!sidebarEl.classList.contains("collapsed"));
+});
+setSidebarCollapsed(localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true");
 
 // The one place this demo hand-writes motion markup, and the only kind of place
 // that earns it: a specific action at a specific moment. Everything the chatbot
@@ -147,17 +256,34 @@ let isSpeaking = false;
 let isAwaitingReply = false;
 
 const GREETING =
-  "Hi there! [MOTION 01KRW97VSEA5G49W2YXWGV8JRV:1] Ask me anything.";
+  "Hello! [MOTION 01KRW97VSEA5G49W2YXWGV8JRV:1] I can assist as your Senior Cloud Architect, Interactive Driving Instructor, or Real-Time Equity Analyst. What would you like to explore?";
+
+const TRI_PERSONA_INSTRUCTIONS =
+  "You operate as a single assistant that switches between three expert personas depending on the user's question:\n\n" +
+  "1. Senior Cloud Architect (questions on cloud infrastructure, system design, AWS/Azure/GCP, scalability, high availability, security, cost, Kubernetes, CI/CD, IaC):\n" +
+  "- Focus on trade-offs (cost, latency, complexity, vendor lock-in), not tutorials. Assume user knows basics.\n" +
+  "- Ground advice in specific concrete services (e.g. ALB with target-tracking auto scaling, Aurora PostgreSQL, SQS FIFO).\n" +
+  "- Ask cloud provider/scale if it changes the answer materially.\n\n" +
+  "2. Interactive Driving Instructor (questions on driving technique, traffic rules, licensing, vehicle handling):\n" +
+  "- Always establish vehicle type (manual/automatic car, motorcycle, truck) and country/region before specific advice.\n" +
+  "- Ask a short follow-up when vehicle or country is missing.\n" +
+  "- Remind user that official handbooks and local laws take precedence.\n\n" +
+  "3. Real-Time Equity Analyst (questions on stocks, indices, market conditions, earnings, financials):\n" +
+  "- Fast, conversational, data-oriented reasoning through tickers/sectors.\n" +
+  "- Do not state live prices as fact without a connected tool. Offer qualitative reasoning instead.\n" +
+  "- Clearly separate facts from speculation, and always include a brief reminder that this is not personalized financial advice.\n\n" +
+  "General Rules:\n" +
+  "- Stay in character for whichever role is active for that turn. Switch roles as topic changes.\n" +
+  "- If question fits none, answer as a helpful generalist assistant.\n" +
+  "- CRITICAL AVATAR RULE: You are speaking out loud through a 3D avatar. Keep responses concise (maximum 2 to 3 sentences). NEVER use markdown formatting, asterisks, bullet points, or code blocks.";
 
 // Prefilled so a new organization can reach a working avatar by pressing Save.
 // Every reply is read aloud by present(), so the instructions ask for short
 // sentences and no markdown — the two things that sound wrong through an avatar.
 const NEW_BOT_DEFAULTS = {
-  name: "Demo Assistant",
+  name: "LifeStack Multi-Persona Assistant",
   instructions:
-    "You are a friendly assistant speaking out loud through an avatar. " +
-    "Keep replies to one or two short sentences, and never use markdown — " +
-    "everything you say is read aloud.",
+    TRI_PERSONA_INSTRUCTIONS,
 };
 
 // Sent only on the own-LLM path. The Connect chatbot gets its persona from its
@@ -165,8 +291,50 @@ const NEW_BOT_DEFAULTS = {
 // for that source — the difference in *where the persona lives* is part of what
 // the switch is demonstrating.
 const OWN_LLM_SYSTEM_PROMPT =
-  "You are a helpful avatar assistant speaking out loud. Keep replies to one " +
-  "or two short sentences. Never use markdown formatting.";
+  TRI_PERSONA_INSTRUCTIONS;
+
+let activePersona = null;
+
+const PERSONA_CONFIGS = {
+  cloud: {
+    label: "Cloud Architect",
+    placeholder: "Ask Cloud Architect… (e.g. system design, AWS/Azure/GCP, scaling)",
+    prefix: "[Persona: Senior Cloud Architect] ",
+  },
+  driving: {
+    label: "Driving Instruction",
+    placeholder: "Ask Driving Instructor… (e.g. parking, road signs, vehicle handling)",
+    prefix: "[Persona: Interactive Driving Instructor] ",
+  },
+  equity: {
+    label: "Equity Analyst",
+    placeholder: "Ask Equity Analyst… (e.g. stock analysis, margins, earnings)",
+    prefix: "[Persona: Real-Time Equity Analyst] ",
+  },
+};
+
+function setActivePersona(personaKey) {
+  if (activePersona === personaKey) {
+    activePersona = null;
+    chatInput.placeholder = "Ask your Cloud Architect, Driving Instructor, or Equity Analyst…";
+  } else {
+    activePersona = personaKey;
+    const cfg = PERSONA_CONFIGS[personaKey];
+    if (cfg) {
+      chatInput.placeholder = cfg.placeholder;
+    }
+  }
+
+  if (personaChips) {
+    for (const btn of personaChips.querySelectorAll(".persona-btn, .persona-chip")) {
+      const key = btn.getAttribute("data-persona");
+      btn.classList.toggle("active", key === activePersona);
+    }
+  }
+
+  chatInput.disabled = false;
+  chatInput.focus();
+}
 
 const CREDIT_EXHAUSTED_CODE = 1003;
 const NO_SUBSCRIPTION_CODE = 14005;
@@ -212,6 +380,14 @@ let source = "connect";
 
 /** Whether LLM_API_KEY is configured — /api/chat 501s without it. */
 const ownLlmAvailable = Boolean(appConfig.chat);
+/** Auto-selected on first load (see loadChatbots) if a chatbot with this
+ * exact name exists in the account — re-checked on every refresh, so
+ * creating it later picks it up on the next load without any other change. */
+const DEFAULT_CHATBOT_NAME = "Hackvatar Demo Assistant";
+/** Set true the first time loadChatbots() runs and finds no chatbot named
+ * DEFAULT_CHATBOT_NAME — surfaced once at the end of bootstrap, not on
+ * every subsequent refresh. */
+let defaultChatbotMissing = false;
 /** ID of the currently selected chatbot, or null. */
 let activeBotId = null;
 /** Lightweight chatbot list from the last /api/chatbots call. */
@@ -281,10 +457,13 @@ async function request(path, { method = "GET", body } = {}) {
 // ── Catalog ────────────────────────────────────────────────────────────────
 
 /**
- * Fill a picker and preselect the first item, so Launch is one click away.
- * `emptyLabel` stays selectable — clearing the voice selects BYO-TTS.
+ * Fill a picker and preselect one item (index 0 — the first — so Launch is
+ * one click away, unless a different initial index is requested; falls
+ * back toward index 0 if the catalog is shorter than that). `emptyLabel`
+ * stays selectable — clearing the voice selects BYO-TTS.
+ * @param {number} [initialIndex]
  */
-function fillSelect(select, items, emptyLabel) {
+function fillSelect(select, items, emptyLabel, initialIndex = 0) {
   select.replaceChildren(
     Object.assign(document.createElement("option"), {
       value: "",
@@ -297,7 +476,7 @@ function fillSelect(select, items, emptyLabel) {
       return opt;
     }),
   );
-  select.value = items[0]?.id ?? "";
+  select.value = (items[initialIndex] ?? items[0])?.id ?? "";
 }
 
 function updateAssetIcon(img, items, id, thumbnailKey) {
@@ -328,14 +507,541 @@ function updateInitBtn() {
 avatarSelect.addEventListener("change", () => {
   updateInitBtn();
   updateAssetIcon(avatarIcon, avatars, avatarSelect.value, "head");
+  syncCarouselActive(avatarCarouselTrack, avatarSelect.value);
+  // No-op unless the Avatar/Scene stage toggles have one turned off, in
+  // which case the forced overlay needs to reflect the new selection too.
+  renderPersistentStageOverlay();
 });
 sceneSelect.addEventListener("change", () => {
   updateInitBtn();
   updateAssetIcon(sceneIcon, scenes, sceneSelect.value, "default");
+  syncCarouselActive(sceneCarouselTrack, sceneSelect.value);
+  renderPersistentStageOverlay();
 });
 // voiceId is only read at initializeWithConnectKey() time, so switching
 // voice must re-enable Launch the same way avatar/scene changes do.
-voiceSelect.addEventListener("change", updateInitBtn);
+voiceSelect.addEventListener("change", () => {
+  updateInitBtn();
+  syncVoiceListActive(voiceListEl, voiceSelect.value);
+});
+
+// ── Avatar / Scene carousels ─────────────────────────────────────────────
+//
+// The <select> elements above stay the real state (every existing .value
+// read and "change" listener still targets them); a carousel click just sets
+// select.value and dispatches "change" itself, same as a real picker would.
+
+/**
+ * @param {HTMLElement} track
+ * @param {Array<{id: string, name: string, thumbnail_urls?: object}>} items
+ * @param {HTMLSelectElement} select
+ * @param {string} thumbnailKey  Key into thumbnail_urls, e.g. "head"/"default".
+ * @param {"avatar"|"scene"} kind  Which half of the hover preview this card
+ *   drives — see showHoverPreview().
+ */
+function fillCarousel(track, items, select, thumbnailKey, kind) {
+  track.replaceChildren(
+    ...items.map((item) => {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "carousel-card";
+      card.dataset.id = item.id;
+      card.setAttribute("role", "option");
+      card.setAttribute("aria-selected", "false");
+
+      const thumbUrl = item.thumbnail_urls?.[thumbnailKey];
+      const thumb = document.createElement(thumbUrl ? "img" : "div");
+      thumb.className = thumbUrl
+        ? "carousel-card-thumb"
+        : "carousel-card-thumb placeholder";
+      if (thumbUrl) {
+        thumb.src = thumbUrl;
+        thumb.alt = "";
+        // Swap to the placeholder glyph rather than leaving a broken-image icon.
+        thumb.onerror = () => {
+          thumb.remove();
+          card.prepend(
+            Object.assign(document.createElement("div"), {
+              className: "carousel-card-thumb placeholder",
+              textContent: "🖼",
+            }),
+          );
+        };
+      } else {
+        thumb.textContent = "🖼";
+      }
+
+      const label = document.createElement("span");
+      label.className = "carousel-card-label";
+      label.textContent = item.name;
+
+      card.append(thumb, label);
+      card.addEventListener("click", () => {
+        select.value = item.id;
+        select.dispatchEvent(new Event("change"));
+      });
+      // mouseenter (not mouseover) so moving between sibling cards inside the
+      // same track re-fires per card without the track's own mouseleave (see
+      // wireCarouselNav below) triggering in between — only a hover, never a
+      // click, so touch devices that never fire it just keep tap-to-select
+      // working unchanged.
+      card.addEventListener("mouseenter", () => {
+        if (kind === "avatar") showHoverPreview(item.id, sceneSelect.value);
+        else showHoverPreview(avatarSelect.value, item.id);
+      });
+      return card;
+    }),
+  );
+  syncCarouselActive(track, select.value);
+}
+
+function syncCarouselActive(track, activeId) {
+  track.querySelectorAll(".carousel-card").forEach((card) => {
+    const active = card.dataset.id === activeId;
+    card.classList.toggle("active", active);
+    card.setAttribute("aria-selected", String(active));
+    // Brings a non-default initial selection (e.g. the 6th avatar) into
+    // view on load; a no-op for a card the user just clicked, since that's
+    // already visible.
+    if (active) card.scrollIntoView({ block: "nearest", inline: "nearest" });
+  });
+}
+
+/** Wired once at load — nav buttons scroll the (fixed) track element, not its children. */
+function wireCarouselNav(carousel, track) {
+  const cardWidth = () => (track.querySelector(".carousel-card")?.offsetWidth ?? 84) + 9; // + track gap
+  carousel
+    .querySelector(".carousel-prev")
+    .addEventListener("click", () =>
+      track.scrollBy({ left: -cardWidth(), behavior: "smooth" }),
+    );
+  carousel
+    .querySelector(".carousel-next")
+    .addEventListener("click", () =>
+      track.scrollBy({ left: cardWidth(), behavior: "smooth" }),
+    );
+}
+wireCarouselNav(avatarCarousel, avatarCarouselTrack);
+wireCarouselNav(sceneCarousel, sceneCarouselTrack);
+
+// ── Avatar / Scene hover preview ─────────────────────────────────────────
+//
+// A fast static image swap on the main stage — not a real presenter launch
+// (that stays behind Launch Presenter, unchanged). Each card's mouseenter
+// (above, in fillCarousel) says *which* avatar/scene to preview; hiding is
+// wired once here on the track itself, not per card, so moving the mouse
+// between sibling cards never fires it — mouseleave only fires when the
+// pointer actually exits the whole track, exactly the "still hovering
+// *a* card" case this needs to tell apart from "hovering nothing now".
+
+/**
+ * @param {string} avatarId
+ * @param {string} sceneId
+ */
+function showHoverPreview(avatarId, sceneId) {
+  const avatar = avatars.find((a) => a.id === avatarId);
+  const scene = scenes.find((s) => s.id === sceneId);
+
+  const avatarUrl = avatar?.thumbnail_urls?.head;
+  hoverPreviewAvatar.hidden = !avatarUrl;
+  if (avatarUrl) hoverPreviewAvatar.src = avatarUrl;
+
+  const sceneUrl = scene?.thumbnail_urls?.default;
+  hoverPreviewScene.hidden = !sceneUrl;
+  if (sceneUrl) hoverPreviewScene.src = sceneUrl;
+
+  hoverPreviewLabel.textContent = [avatar?.name, scene?.name]
+    .filter(Boolean)
+    .join("  ·  ");
+  hoverPreview.hidden = false;
+}
+
+function hideHoverPreview() {
+  hoverPreview.hidden = true;
+}
+
+// Leaving a hover reveals renderPersistentStageOverlay()'s state, not a bare
+// hide — if the Avatar/Scene stage toggles below have either one turned off,
+// that forced overlay should still be showing afterward, not the live view.
+avatarCarouselTrack.addEventListener("mouseleave", renderPersistentStageOverlay);
+sceneCarouselTrack.addEventListener("mouseleave", renderPersistentStageOverlay);
+
+// ── Stage toolbar: Avatar / Scene / Voice / Text / Timeline ──────────────
+//
+// Avatar/Scene: the presenter's public API (@perxona/presenter-types) has no
+// method to hide just one of the two within its own live 3D render —
+// initializeWithConnectKey takes both together, and nothing else in the
+// interface exposes per-layer visibility. So "off" falls back to the same
+// static thumbnail overlay hover already uses, showing only the enabled
+// layer(s) — a real, visible effect, just not decomposing the live canvas.
+// Voice: presenter.muteAudio() is a real documented method — this one
+// actually mutes the live spoken audio, not an approximation.
+// Text: shares state with the "Conversation text" toggle near the chat
+// input; the two checkboxes stay in sync either way they're flipped.
+let stageAvatarVisible = true;
+let stageSceneVisible = true;
+let timelineVisible = false;
+
+/**
+ * Redraws the persistent (non-hover) stage overlay from the two visibility
+ * flags above. Called on toggle change, when the presenter reaches Ready,
+ * on avatar/scene selection change, and by mouseleave instead of an
+ * unconditional hide.
+ */
+function renderPersistentStageOverlay() {
+  if (stageAvatarVisible && stageSceneVisible) {
+    hideHoverPreview();
+    return;
+  }
+  showHoverPreview(
+    stageAvatarVisible ? avatarSelect.value : "",
+    stageSceneVisible ? sceneSelect.value : "",
+  );
+}
+
+stageToggleAvatar.addEventListener("change", () => {
+  stageAvatarVisible = stageToggleAvatar.checked;
+  renderPersistentStageOverlay();
+});
+stageToggleScene.addEventListener("change", () => {
+  stageSceneVisible = stageToggleScene.checked;
+  renderPersistentStageOverlay();
+});
+stageToggleVoice.addEventListener("change", () => {
+  presenter.muteAudio?.(!stageToggleVoice.checked);
+});
+// Two checkboxes, one piece of state: whichever changes drives chatLog via
+// the original textVisibilityToggle listener (further down), and updates
+// the other checkbox to match — dispatching "change" rather than duplicating
+// the hide/show logic here.
+stageToggleText.addEventListener("change", () => {
+  textVisibilityToggle.checked = stageToggleText.checked;
+  textVisibilityToggle.dispatchEvent(new Event("change"));
+});
+textVisibilityToggle.addEventListener("change", () => {
+  stageToggleText.checked = textVisibilityToggle.checked;
+});
+stageToggleTimeline.addEventListener("change", () => {
+  timelineVisible = stageToggleTimeline.checked;
+  updateDebugPanelVisibility();
+});
+
+/** debugPanel is only ever visible once launched AND while the Timeline
+ * toggle is on — both conditions gate it, so either one turning off hides it. */
+function updateDebugPanelVisibility() {
+  debugPanel.hidden = !presenterReady || !timelineVisible;
+}
+
+// ── Motion picker ─────────────────────────────────────────────────────────
+//
+// Real motion catalog via GET /api/avatars/:id/motions — an existing server
+// route (see server.mjs) the frontend never called until now. Triggering
+// reuses the same command pathway as every other presenter interaction: a
+// direct presenter.playMotion() call, logged through appendDebug() exactly
+// like present()/setThinking() elsewhere in this file.
+
+/** Cache of the last-fetched motion list, keyed by avatar id so switching
+ * avatars and switching back doesn't always re-fetch. */
+let motionsForCurrentAvatar = [];
+let motionsLoadedForAvatarId = null;
+
+function closeMotionPicker() {
+  motionPickerPopup.hidden = true;
+  motionPickerToggle.setAttribute("aria-expanded", "false");
+}
+
+async function openMotionPicker() {
+  motionPickerPopup.hidden = false;
+  motionPickerToggle.setAttribute("aria-expanded", "true");
+  const avatarId = avatarSelect.value;
+  if (!avatarId) {
+    renderMotionList([], "Select an avatar first.");
+    return;
+  }
+  if (motionsLoadedForAvatarId === avatarId) {
+    renderMotionList(motionsForCurrentAvatar);
+    return;
+  }
+  renderMotionList([], "Loading…");
+  try {
+    const { items } = await request(
+      `/api/avatars/${encodeURIComponent(avatarId)}/motions`,
+    );
+    motionsForCurrentAvatar = items ?? [];
+    motionsLoadedForAvatarId = avatarId;
+    // The picker may have been closed (or switched to a different avatar)
+    // while this was in flight.
+    if (avatarSelect.value !== avatarId || motionPickerPopup.hidden) return;
+    renderMotionList(motionsForCurrentAvatar);
+  } catch (err) {
+    renderMotionList([], `Failed to load motions: ${err.message}`);
+  }
+}
+
+/**
+ * @param {Array<{motion_id: string, name: string}>} motions
+ * @param {string} [emptyMessage] Shown instead of the list when motions is empty.
+ */
+/**
+ * The Connect API's motion catalog is real, but not every entry has a
+ * hand-authored name — some are raw internal identifiers ("2026-07-W501-077
+ * - Derived Motion", "m_cc_talk_stand_05") that mean nothing to a person
+ * picking a motion to trigger. Detects that case and builds a readable
+ * label from the motion's semantic tags instead (intent/pose/category —
+ * see the real /api/avatars/:id/motions response); a motion with a normal,
+ * already-descriptive name (e.g. "Left Arm Presenting Gesture") passes
+ * through untouched.
+ * @param {{name: string, tags?: string[]}} motion
+ */
+function humanizeMotionName(motion) {
+  const rawName = motion.name ?? "";
+  const looksGeneric =
+    /derived motion$/i.test(rawName) || /^[a-z]+_[a-z]+_/i.test(rawName);
+  if (!looksGeneric) return rawName;
+
+  const tags = motion.tags ?? [];
+  const valuesFor = (prefix) =>
+    tags
+      .filter((t) => t.startsWith(`${prefix}:`))
+      .map((t) => t.slice(prefix.length + 1));
+  const titleCase = (s) =>
+    s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+  const intents = valuesFor("intent");
+  if (intents.length) return intents.slice(0, 2).map(titleCase).join(" / ");
+
+  const pose = valuesFor("pose")[0];
+  if (pose) return titleCase(pose);
+
+  const category = valuesFor("category")[0];
+  if (category) return titleCase(category);
+
+  // Last resort: humanize the raw slug itself — strip a leading
+  // skeleton-id-style prefix (e.g. "m_cc_") and title-case what's left.
+  return titleCase(rawName.replace(/^[a-z]+_[a-z]+_/i, "")) || rawName;
+}
+
+function renderMotionList(motions, emptyMessage = "No motions available.") {
+  if (motions.length === 0) {
+    motionPickerList.replaceChildren(
+      Object.assign(document.createElement("li"), {
+        className: "motion-picker-empty",
+        textContent: emptyMessage,
+      }),
+    );
+    return;
+  }
+  motionPickerList.replaceChildren(
+    ...motions.map((motion) => {
+      const li = document.createElement("li");
+      li.className = "motion-picker-item";
+      li.setAttribute("role", "option");
+      li.textContent = humanizeMotionName(motion);
+      li.addEventListener("click", () => triggerMotion(motion));
+      return li;
+    }),
+  );
+}
+
+async function triggerMotion(motion) {
+  // (b) minimize immediately on click, regardless of outcome — the toggle
+  // button stays right where it was as the reopen affordance.
+  closeMotionPicker();
+  if (!presenterReady) {
+    setStatus("Launch the presenter before triggering a motion.");
+    return;
+  }
+  appendDebug(
+    "cmd",
+    `presenter.playMotion(${motion.motion_id}) — ${humanizeMotionName(motion)}`,
+  );
+  try {
+    const result = await presenter.playMotion(motion.motion_id);
+    if (!result?.success) {
+      appendDebug(
+        "err",
+        `playMotion() failed: ${result?.code} — ${result?.message ?? ""}`,
+      );
+    } else {
+      appendDebug("ok", "playMotion() accepted ✓");
+    }
+  } catch (err) {
+    appendDebug("err", `playMotion() threw: ${err.message}`);
+  }
+}
+
+motionPickerToggle.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (motionPickerPopup.hidden) openMotionPicker();
+  else closeMotionPicker();
+});
+motionPickerPopup.addEventListener("click", (e) => e.stopPropagation());
+// Close on any outside click or Escape — same dismiss pattern as the
+// chatbot picker above.
+document.addEventListener("click", closeMotionPicker);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeMotionPicker();
+});
+// Switching avatars invalidates the cached list so the next open re-fetches.
+avatarSelect.addEventListener("change", () => {
+  motionsLoadedForAvatarId = null;
+});
+
+// ── Avatar framing ────────────────────────────────────────────────────────
+//
+// presenter.updateCameraAngle() (a real, documented method) only has two
+// built-in presets: "fullbody" and "halfbody" — nothing matching a
+// head-and-neck close-up. Mid and Full map directly to those; Face has no
+// SDK preset, so it also applies a CSS zoom (see .framing-face in
+// style.css) cropping the halfbody frame down to head + neck within
+// .stage's own overflow:hidden. Assumes "halfbody" is today's existing
+// default framing, so selecting Mid is a no-op versus current behavior —
+// correct that mapping here if this account's actual default differs.
+const FRAMINGS = {
+  mid: { angle: "halfbody", zoom: false },
+  full: { angle: "fullbody", zoom: false },
+  face: { angle: "halfbody", zoom: true },
+};
+
+function applyFraming(id) {
+  const framing = FRAMINGS[id] ?? FRAMINGS.mid;
+  presenter.classList.toggle("framing-face", framing.zoom);
+  if (presenterReady) {
+    appendDebug("cmd", `presenter.updateCameraAngle(${framing.angle})`);
+    presenter.updateCameraAngle?.(framing.angle);
+    // "Fullbody" in particular has been seen rendering outside .stage's
+    // bounds — a resize nudge gives the internal canvas a chance to
+    // recompute against the container's actual current dimensions rather
+    // than whatever it last measured, which .stage's own overflow:hidden
+    // and the max-width/max-height guards in style.css can't fix on their
+    // own if the widget's internal render target itself is oversized.
+    window.setTimeout(() => window.dispatchEvent(new Event("resize")), 50);
+  }
+}
+
+framingSelect.addEventListener("change", () => applyFraming(framingSelect.value));
+// Applied (again) once the presenter is actually ready, in case the
+// dropdown was changed before Launch — updateCameraAngle has nothing to
+// act on until then, only the CSS zoom half of Face would have applied.
+presenter.addEventListener("PRESENTER_STATUS", (e) => {
+  if (e.detail.status === "Ready") applyFraming(framingSelect.value);
+});
+
+// ── Voice list + hover preview ───────────────────────────────────────────
+//
+// A selectable list rather than a carousel (voices have no image). Hovering
+// a row plays a real synthesized preview — see scheduleVoicePreview below.
+
+/**
+ * @param {HTMLElement} listEl
+ * @param {Array<{id: string, name: string}>} items
+ * @param {HTMLSelectElement} select
+ */
+function fillVoiceList(listEl, items, select) {
+  listEl.replaceChildren(
+    ...items.map((item) => {
+      const li = document.createElement("li");
+      li.className = "voice-item";
+      li.dataset.id = item.id;
+      li.setAttribute("role", "option");
+      li.setAttribute("aria-selected", "false");
+
+      const label = document.createElement("span");
+      label.textContent = item.name;
+      const previewIcon = document.createElement("span");
+      previewIcon.className = "voice-item-preview-icon";
+      previewIcon.textContent = "🔊";
+      previewIcon.setAttribute("aria-hidden", "true");
+      li.append(label, previewIcon);
+
+      li.addEventListener("click", () => {
+        select.value = item.id;
+        select.dispatchEvent(new Event("change"));
+      });
+      li.addEventListener("mouseenter", () =>
+        scheduleVoicePreview(li, item.id),
+      );
+      li.addEventListener("mouseleave", cancelPendingVoicePreview);
+      return li;
+    }),
+  );
+  syncVoiceListActive(listEl, select.value);
+}
+
+function syncVoiceListActive(listEl, activeId) {
+  listEl.querySelectorAll(".voice-item").forEach((li) => {
+    const active = li.dataset.id === activeId;
+    li.classList.toggle("active", active);
+    li.setAttribute("aria-selected", String(active));
+  });
+}
+
+// Real synthesis via the server (see server.mjs), not a canned clip —
+// debounced so sweeping across the list doesn't fire one request per row it
+// passes over, and cached per voice so a repeat hover replays instantly
+// instead of re-synthesizing (and re-spending the upstream TTS token call).
+const VOICE_PREVIEW_DEBOUNCE_MS = 400;
+const voicePreviewCache = new Map(); // voiceId -> Promise<string> (object URL)
+let voicePreviewTimer = null;
+let activePreviewItem = null;
+const voicePreviewAudio = new Audio();
+
+function clearPreviewIndicator() {
+  activePreviewItem?.classList.remove("previewing");
+  activePreviewItem = null;
+}
+voicePreviewAudio.addEventListener("ended", clearPreviewIndicator);
+voicePreviewAudio.addEventListener("pause", clearPreviewIndicator);
+voicePreviewAudio.addEventListener("error", clearPreviewIndicator);
+
+function scheduleVoicePreview(li, voiceId) {
+  clearTimeout(voicePreviewTimer);
+  voicePreviewTimer = setTimeout(
+    () => playVoicePreview(li, voiceId),
+    VOICE_PREVIEW_DEBOUNCE_MS,
+  );
+}
+
+/** Cancels a preview still waiting out the debounce. One already playing is
+ * short enough to just let finish rather than cutting it off mid-word. */
+function cancelPendingVoicePreview() {
+  clearTimeout(voicePreviewTimer);
+}
+
+async function playVoicePreview(li, voiceId) {
+  try {
+    let urlPromise = voicePreviewCache.get(voiceId);
+    if (!urlPromise) {
+      urlPromise = fetch(
+        `/api/voices/${encodeURIComponent(voiceId)}/preview`,
+        { method: "POST" },
+      ).then(async (r) => {
+        if (!r.ok) {
+          const data = await r.json().catch(() => ({}));
+          throw new Error(data.error ?? `Preview failed (${r.status})`);
+        }
+        return URL.createObjectURL(await r.blob());
+      });
+      voicePreviewCache.set(voiceId, urlPromise);
+    }
+    const url = await urlPromise;
+    // Cuts off whatever was already playing, so hovering across rows quickly
+    // never overlaps two voices' audio.
+    clearPreviewIndicator();
+    activePreviewItem = li;
+    li.classList.add("previewing");
+    voicePreviewAudio.pause();
+    voicePreviewAudio.src = url;
+    await voicePreviewAudio.play();
+  } catch (err) {
+    // Non-fatal — a failed preview must never block picking the voice.
+    // Drop the cache entry so hovering again retries rather than replaying
+    // the same failure forever.
+    voicePreviewCache.delete(voiceId);
+    clearPreviewIndicator();
+    console.error("Voice preview failed:", err);
+  }
+}
 
 async function loadCatalog() {
   setStatus("Loading catalog…");
@@ -348,9 +1054,14 @@ async function loadCatalog() {
       ]);
     avatars = avatarList;
     scenes = sceneList;
-    fillSelect(avatarSelect, avatarList, "— select avatar —");
-    fillSelect(sceneSelect, sceneList, "— select scene —");
-    fillSelect(voiceSelect, voiceList, "— no voice —");
+    // Initial picks: 6th avatar, 2nd scene, 1st voice (indices 5/1/0) —
+    // falls back toward index 0 in fillSelect if a catalog is shorter.
+    fillSelect(avatarSelect, avatarList, "— select avatar —", 5);
+    fillSelect(sceneSelect, sceneList, "— select scene —", 1);
+    fillSelect(voiceSelect, voiceList, "— no voice —", 0);
+    fillCarousel(avatarCarouselTrack, avatarList, avatarSelect, "head", "avatar");
+    fillCarousel(sceneCarouselTrack, sceneList, sceneSelect, "default", "scene");
+    fillVoiceList(voiceListEl, voiceList, voiceSelect);
     updateInitBtn();
     updateAssetIcon(avatarIcon, avatars, avatarSelect.value, "head");
     updateAssetIcon(sceneIcon, scenes, sceneSelect.value, "default");
@@ -388,7 +1099,9 @@ presenter.addEventListener("PRESENTER_STATUS", (e) => {
     isLaunching = false;
     stagePlaceholder.hidden = true;
     presenter.hidden = false;
-    debugPanel.hidden = false; // reveal the timeline once the avatar is live
+    updateDebugPanelVisibility(); // reveals the timeline, unless toggled off
+    presenter.muteAudio?.(!stageToggleVoice.checked); // apply any pre-launch mute
+    renderPersistentStageOverlay(); // apply any pre-launch Avatar/Scene toggle
     updateChatUI();
     // Same rule the submit handler applies: a line that never queued has no
     // ALL_PERFORMANCE_FINISHED coming, so nothing else will release the controls.
@@ -446,7 +1159,11 @@ async function fetchConnectKey() {
   return connect_key;
 }
 
-initBtn.addEventListener("click", async () => {
+/**
+ * Shared by the Launch button and the auto-launch-on-load call in bootstrap
+ * below — same steps either way.
+ */
+async function launchPresenter() {
   if (isPresenterLaunchDisabled) {
     setStatus("Configure live credentials to launch the presenter.");
     return;
@@ -457,6 +1174,10 @@ initBtn.addEventListener("click", async () => {
   try {
     // resumeAudioPlayback must be called from a direct user gesture to satisfy
     // browser autoplay policy before the presenter attempts audio playback.
+    // A programmatic auto-launch has no such gesture behind it, so this call
+    // is a no-op in that case — see unlockAudioOnce() near the bootstrap,
+    // which is what actually restores audio once the user does anything at
+    // all on the page.
     await presenter.resumeAudioPlayback?.();
     const connectKey = await fetchConnectKey();
     setStatus("Initializing…");
@@ -471,7 +1192,9 @@ initBtn.addEventListener("click", async () => {
     isLaunching = false;
     updateInitBtn();
   }
-});
+}
+
+initBtn.addEventListener("click", launchPresenter);
 
 // ── Speak helper ──────────────────────────────────────────────────────────
 
@@ -519,6 +1242,7 @@ async function speak(text) {
         "err",
         `present() failed: ${result?.code} — ${result?.message ?? ""}`,
       );
+      setSpeaking(false);
       return false;
     }
     appendDebug("ok", "present() accepted — performance queued ✓");
@@ -526,6 +1250,7 @@ async function speak(text) {
   } catch (err) {
     setStatus(`Playback error: ${err.message}`);
     appendDebug("err", `present() threw: ${err.message}`);
+    setSpeaking(false);
     return false;
   }
 }
@@ -657,12 +1382,21 @@ async function loadChatbots() {
     const { items } = await request("/api/chatbots");
     chatbotList = items ?? [];
     populateBotPicker(chatbotList);
-    // Restore previous selection, or clear if the bot was deleted.
+    // Restore previous selection, or fall back to the default chatbot (or
+    // clear, if neither exists) if the bot was deleted or this is first load.
     const previousId = activeBotId;
     if (previousId && chatbotList.some((b) => b.id === previousId)) {
       selectChatbot(previousId);
     } else {
-      selectChatbot(null);
+      const defaultBot = chatbotList.find(
+        (b) => b.name === DEFAULT_CHATBOT_NAME,
+      );
+      if (defaultBot) {
+        selectChatbot(defaultBot.id);
+      } else {
+        selectChatbot(null);
+        defaultChatbotMissing = true;
+      }
     }
     // A new organization has none; an empty picker on its own is a dead end.
     if (chatbotList.length === 0) {
@@ -912,7 +1646,21 @@ function interruptSpeaking() {
   setSpeaking(false);
 }
 
-chatStopBtn.addEventListener("click", interruptSpeaking);
+chatStopBtn.addEventListener("click", () => {
+  interruptSpeaking();
+  if (typeof isLiveMode !== "undefined" && isLiveMode) {
+    toggleLiveMode(false);
+  }
+});
+
+// Text visibility toggle. Hides the whole transcript element ([hidden] is
+// display:none!important — see the reset at the top of style.css), not just
+// each message's text: new replies still append underneath while off, so
+// switching back on immediately shows the full conversation, not just what
+// arrived after.
+textVisibilityToggle.addEventListener("change", () => {
+  chatLog.hidden = !textVisibilityToggle.checked;
+});
 
 // <sv-presenter> already interrupts itself when the tab backgrounds, but
 // that only ever dispatches PERFORMANCE_END, never ALL_PERFORMANCE_FINISHED
@@ -945,6 +1693,15 @@ chatForm.addEventListener("submit", (e) => {
   submitChatMessage(chatInput.value.trim());
 });
 
+personaChips?.addEventListener("click", (e) => {
+  const btn = e.target.closest(".persona-btn, .persona-chip");
+  if (!btn) return;
+  const personaKey = btn.getAttribute("data-persona");
+  if (personaKey) {
+    setActivePersona(personaKey);
+  }
+});
+
 /**
  * Send `text` through the active source (Connect chatbot or own LLM) and hand
  * the reply to the presenter. The one path both typed submissions and voice
@@ -955,13 +1712,21 @@ chatForm.addEventListener("submit", (e) => {
 async function submitChatMessage(text) {
   if (!text || !canSend()) return;
 
+  if (isSpeaking) {
+    interruptSpeaking();
+  }
+
   chatInput.value = "";
   setAwaitingReply(true);
   let queued = false;
 
   // Add user message to history and display it
   appendChat("user", text);
-  chatHistory.push({ role: "user", text });
+  const promptText =
+    activePersona && PERSONA_CONFIGS[activePersona]
+      ? `${PERSONA_CONFIGS[activePersona].prefix}${text}`
+      : text;
+  chatHistory.push({ role: "user", text: promptText });
 
   // Signal "thinking" on the presenter while the LLM processes the request
   appendDebug("cmd", "presenter.setThinking(true)");
@@ -1067,41 +1832,239 @@ async function submitChatMessage(text) {
   }
 }
 
-// ── Voice input (Web Speech API) ──────────────────────────────────────────
+// ── Voice input (Web Speech API) & Live Mode ──────────────────────────────
 //
 // Connect Kit has no speech-to-text API of its own, so this uses the
 // browser's native SpeechRecognition — free, no extra credentials, but
-// Chrome/Edge only (not Firefox). Feature-detected below: on an unsupported
-// browser the mic button just doesn't appear, and typed input is unaffected
-// either way.
+// Chrome/Edge only (not Firefox).
+//
+// Live Mode provides hands-free continuous conversation:
+// 1. Audio input stays active in a turn-taking loop.
+// 2. Microphone pauses while the avatar is speaking (preventing audio feedback).
+// 3. Once the avatar finishes, listening automatically resumes.
+// 4. A rich animated sound wave visualizer and stage HUD show listening state.
 
 const SpeechRecognitionImpl =
   window.SpeechRecognition || window.webkitSpeechRecognition;
 const micSupported = Boolean(SpeechRecognitionImpl);
 
-/** True while recognition is actively listening (button shows the "stop" state). */
+/** True while recognition is actively listening. */
 let isListening = false;
+/** True when hands-free continuous Live Mode is enabled. */
+let isLiveMode = false;
 /** Accumulated final-result text for the current listening session. */
 let finalTranscript = "";
-/**
- * Set by the 'error' event, read by 'end' right after — 'end' always fires
- * after 'error' (per the Web Speech spec), and it's 'end' that decides
- * whether to auto-send. An error (denied mic, no speech heard) means there is
- * nothing usable to send.
- */
+/** Error code from the 'error' event. */
 let micErrorCode = null;
+/** Timer for restarting recognition in Live Mode. */
+let liveModeRestartTimer = null;
+/** SpeechRecognition instance. */
+let recognition = null;
+
+// Web Audio API for dynamic voice reactivity
+let audioCtx = null;
+let analyserNode = null;
+let micStream = null;
+let vizAnimFrameId = null;
 
 function setMicStatus(text) {
   micStatus.textContent = text;
 }
 
+function showListeningVisualizer(status = "Listening…", interim = "Speak naturally") {
+  if (audioListeningPanel) {
+    audioListeningPanel.hidden = false;
+  }
+  if (listeningStatusText) {
+    listeningStatusText.textContent = status;
+  }
+  if (listeningInterimText) {
+    listeningInterimText.textContent = interim;
+  }
+  if (stageListeningHud) {
+    stageListeningHud.hidden = false;
+  }
+  if (stageHudText) {
+    stageHudText.textContent = status;
+  }
+  startAudioVisualizer();
+}
+
+function updateListeningStatus(status, interim) {
+  if (listeningStatusText && status) {
+    listeningStatusText.textContent = status;
+  }
+  if (listeningInterimText && interim !== undefined) {
+    listeningInterimText.textContent = interim;
+  }
+  if (stageHudText && status) {
+    stageHudText.textContent = status;
+  }
+}
+
+function updateListeningInterim(text) {
+  if (listeningInterimText) {
+    listeningInterimText.textContent = text ? `“${text}”` : "Speak naturally";
+  }
+  if (stageHudText) {
+    stageHudText.textContent = text ? `“${text.length > 25 ? "…" + text.slice(-22) : text}”` : "Listening…";
+  }
+}
+
+function hideListeningVisualizer() {
+  if (audioListeningPanel) {
+    audioListeningPanel.hidden = true;
+  }
+  if (stageListeningHud) {
+    stageListeningHud.hidden = true;
+  }
+  stopAudioVisualizer();
+}
+
+async function startAudioVisualizer() {
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) return;
+    if (!audioCtx) {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      audioCtx = new AudioCtx();
+    }
+    if (audioCtx.state === "suspended") {
+      await audioCtx.resume();
+    }
+    if (!micStream) {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    }
+    if (!analyserNode && micStream) {
+      analyserNode = audioCtx.createAnalyser();
+      analyserNode.fftSize = 64;
+      analyserNode.smoothingTimeConstant = 0.5;
+      const source = audioCtx.createMediaStreamSource(micStream);
+      source.connect(analyserNode);
+    }
+    drawAudioVisualizer();
+  } catch {
+    // If Web Audio API is restricted or not permitted, CSS keyframes animate smoothly
+  }
+}
+
+function drawAudioVisualizer() {
+  if (!isListening || !analyserNode) return;
+  const dataArray = new Uint8Array(analyserNode.frequencyBinCount);
+  analyserNode.getByteFrequencyData(dataArray);
+
+  const bars = document.querySelectorAll(".audio-wave-bars .wave-bar");
+  if (bars.length > 0) {
+    const step = Math.max(1, Math.floor(dataArray.length / bars.length));
+    bars.forEach((bar, idx) => {
+      const val = dataArray[idx * step] || 0;
+      const height = Math.max(5, Math.min(24, Math.round((val / 255) * 24 + 4)));
+      bar.style.height = `${height}px`;
+    });
+  }
+
+  const hudBars = document.querySelectorAll(".stage-hud-bars .hud-bar");
+  if (hudBars.length > 0) {
+    const step = Math.max(1, Math.floor(dataArray.length / hudBars.length));
+    hudBars.forEach((bar, idx) => {
+      const val = dataArray[idx * step] || 0;
+      const height = Math.max(4, Math.min(14, Math.round((val / 255) * 14 + 3)));
+      bar.style.height = `${height}px`;
+    });
+  }
+
+  vizAnimFrameId = requestAnimationFrame(drawAudioVisualizer);
+}
+
+function stopAudioVisualizer() {
+  if (vizAnimFrameId) {
+    cancelAnimationFrame(vizAnimFrameId);
+    vizAnimFrameId = null;
+  }
+  const bars = document.querySelectorAll(".audio-wave-bars .wave-bar");
+  bars.forEach((bar) => {
+    bar.style.height = "";
+  });
+  const hudBars = document.querySelectorAll(".stage-hud-bars .hud-bar");
+  hudBars.forEach((bar) => {
+    bar.style.height = "";
+  });
+}
+
+function scheduleLiveModeRestart(delayMs = 250) {
+  if (liveModeRestartTimer) {
+    clearTimeout(liveModeRestartTimer);
+    liveModeRestartTimer = null;
+  }
+  liveModeRestartTimer = setTimeout(() => {
+    liveModeRestartTimer = null;
+    if (isLiveMode && !isListening && !isSpeaking && !isAwaitingReply && canSend()) {
+      startSpeechRecognition();
+    }
+  }, delayMs);
+}
+
+function startSpeechRecognition() {
+  if (!recognition || isListening) return;
+  setMicStatus("");
+  finalTranscript = "";
+  try {
+    recognition.start();
+  } catch (err) {
+    console.debug("Recognition start notice:", err);
+  }
+}
+
+function stopSpeechRecognition() {
+  if (!recognition || !isListening) return;
+  try {
+    recognition.stop();
+  } catch (err) {
+    console.debug("Recognition stop notice:", err);
+  }
+}
+
+function toggleLiveMode(forceState) {
+  const next = typeof forceState === "boolean" ? forceState : !isLiveMode;
+  isLiveMode = next;
+
+  if (liveModeBtn) {
+    liveModeBtn.classList.toggle("active", isLiveMode);
+    const label = liveModeBtn.querySelector(".live-text");
+    if (label) {
+      label.textContent = isLiveMode ? "Live: ON" : "Live Mode";
+    }
+  }
+
+  if (isLiveMode) {
+    setMicStatus("Live mode active — speak naturally. Audio input will keep running between turns.");
+    if (isSpeaking) {
+      interruptSpeaking();
+    }
+    if (!isListening && !isAwaitingReply && canSend()) {
+      startSpeechRecognition();
+    }
+  } else {
+    if (liveModeRestartTimer) {
+      clearTimeout(liveModeRestartTimer);
+      liveModeRestartTimer = null;
+    }
+    if (isListening) {
+      stopSpeechRecognition();
+    }
+    hideListeningVisualizer();
+    setMicStatus("");
+  }
+}
+
 if (!micSupported) {
   micBtn.hidden = true;
+  if (liveModeBtn) liveModeBtn.hidden = true;
   setMicStatus(
     "Voice input isn't supported in this browser — try Chrome or Edge. Typing still works.",
   );
 } else {
-  const recognition = new SpeechRecognitionImpl();
+  recognition = new SpeechRecognitionImpl();
   recognition.continuous = true;
   recognition.interimResults = true;
   recognition.lang = navigator.language || "en-US";
@@ -1112,12 +2075,12 @@ if (!micSupported) {
     micBtn.classList.add("listening");
     micBtn.title = "Stop voice input";
     micBtn.setAttribute("aria-label", "Stop voice input");
-    setMicStatus("Listening…");
+    const status = isLiveMode ? "Live Mode: Listening…" : "Listening…";
+    setMicStatus(status);
+    showListeningVisualizer(status, "Speak naturally");
     syncChatControls();
   });
 
-  // Fires repeatedly as speech comes in. Interim segments repaint the input
-  // live; only 'isFinal' segments are kept once the session ends (see 'end').
   recognition.addEventListener("result", (e) => {
     let interim = "";
     for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -1125,12 +2088,11 @@ if (!micSupported) {
       if (result.isFinal) finalTranscript += result[0].transcript;
       else interim += result[0].transcript;
     }
-    chatInput.value = (finalTranscript + interim).trim();
+    const current = (finalTranscript + interim).trim();
+    chatInput.value = current;
+    updateListeningInterim(current);
   });
 
-  // continuous mode keeps the mic open across brief pauses on its own — this
-  // is what makes "stop on a natural pause" actually happen, instead of
-  // listening forever until the button is clicked again.
   recognition.addEventListener("speechend", () => {
     recognition.stop();
   });
@@ -1141,10 +2103,14 @@ if (!micSupported) {
       setMicStatus(
         "Microphone access denied — allow it in your browser's site settings to use voice input.",
       );
+      if (isLiveMode) {
+        toggleLiveMode(false);
+      }
     } else if (e.error === "no-speech") {
-      setMicStatus("No speech detected.");
+      if (!isLiveMode) {
+        setMicStatus("No speech detected.");
+      }
     } else if (e.error !== "aborted") {
-      // 'aborted' is just the user's own stop click — not worth surfacing.
       setMicStatus(`Voice input error: ${e.error}`);
     }
   });
@@ -1154,40 +2120,48 @@ if (!micSupported) {
     micBtn.classList.remove("listening");
     micBtn.title = "Voice input";
     micBtn.setAttribute("aria-label", "Start voice input");
+    stopAudioVisualizer();
     syncChatControls();
 
     const text = finalTranscript.trim();
     finalTranscript = "";
 
-    // An error (denied mic, no speech) already has its message on screen and
-    // produced nothing usable to send — leave it there rather than sending
-    // or silently clearing it out from under the user.
-    if (micErrorCode) {
+    if (micErrorCode && micErrorCode !== "no-speech") {
       micErrorCode = null;
+      if (!isLiveMode) hideListeningVisualizer();
       return;
     }
+    micErrorCode = null;
 
-    setMicStatus("");
-    if (!text) return; // stopped with nothing transcribed — back to idle, no empty send
-    chatInput.value = text;
-    submitChatMessage(text);
+    if (text) {
+      setMicStatus("");
+      chatInput.value = text;
+      submitChatMessage(text);
+    } else if (isLiveMode && !isSpeaking && !isAwaitingReply && canSend()) {
+      scheduleLiveModeRestart(200);
+    } else if (!isLiveMode) {
+      setMicStatus("");
+      hideListeningVisualizer();
+    }
   });
 
   micBtn.addEventListener("click", () => {
+    if (isSpeaking) {
+      interruptSpeaking();
+    }
     if (isListening) {
-      recognition.stop();
+      stopSpeechRecognition();
+      if (isLiveMode) {
+        toggleLiveMode(false);
+      }
       return;
     }
     setMicStatus("");
-    finalTranscript = "";
-    try {
-      recognition.start();
-    } catch {
-      // start() throws if a session is already active — the disabled state
-      // from syncChatControls() already prevents this in practice, so this
-      // is just a defensive fallback, not an expected path.
-      setMicStatus("Could not start voice input.");
-    }
+    startSpeechRecognition();
+  });
+
+  liveModeBtn?.addEventListener("click", () => {
+    toggleLiveMode();
   });
 }
 
@@ -1200,7 +2174,16 @@ if (!micSupported) {
 function setSpeaking(speaking) {
   isSpeaking = speaking;
   syncChatControls();
-  if (!speaking) chatInput.focus();
+  if (speaking) {
+    if (isLiveMode) {
+      updateListeningStatus("Avatar speaking…", "Microphone paused during reply");
+    }
+  } else {
+    chatInput.focus();
+    if (isLiveMode && canSend()) {
+      scheduleLiveModeRestart(350);
+    }
+  }
 }
 
 /**
@@ -1210,6 +2193,9 @@ function setSpeaking(speaking) {
 function setAwaitingReply(awaiting) {
   isAwaitingReply = awaiting;
   syncChatControls();
+  if (awaiting && isLiveMode) {
+    updateListeningStatus("Thinking…", "Processing response");
+  }
 }
 
 /**
@@ -1261,11 +2247,19 @@ function syncChatControls() {
   // Stop follows the performance alone: there is nothing to interrupt while a
   // request is merely in flight.
   chatStopBtn.disabled = !isSpeaking;
-  chatSendBtn.disabled = busy || !canSend();
-  chatInput.disabled = busy;
+  chatSendBtn.disabled = isAwaitingReply || !canSend();
+  chatInput.disabled = isAwaitingReply;
   // Same gate as Send, except while actively listening — that state must stay
   // clickable so the button can also act as Stop.
-  if (micSupported) micBtn.disabled = !isListening && (busy || !canSend());
+  if (micSupported) micBtn.disabled = !isListening && (isAwaitingReply || !canSend());
+  if (personaChips) {
+    for (const chip of personaChips.querySelectorAll(".persona-btn, .persona-chip")) {
+      chip.disabled = isAwaitingReply;
+    }
+  }
+  if (liveModeBtn) {
+    liveModeBtn.disabled = !canSend();
+  }
 }
 
 function setStatus(text) {
@@ -1633,4 +2627,36 @@ await Promise.all([
         },
       ),
 ]);
+if (defaultChatbotMissing) {
+  console.warn(
+    `Default chatbot "${DEFAULT_CHATBOT_NAME}" was not found in this account — none was auto-selected. Create one with this exact name to have it picked up automatically on the next load.`,
+  );
+}
 updateChatUI();
+
+// Auto-launch on load — avatar/scene both already default to a fixed choice
+// (see the fillSelect calls in loadCatalog), so nothing else blocks this
+// once the presenter engine itself has loaded.
+if (
+  !isPresenterLaunchDisabled &&
+  presenterEngineReady &&
+  avatarSelect.value &&
+  sceneSelect.value
+) {
+  launchPresenter();
+}
+
+// Browser autoplay policy blocks resumeAudioPlayback() unless it runs from a
+// real user gesture — which the automatic launch above doesn't have, so the
+// avatar comes up but starts silent. This listens for the very first actual
+// interaction anywhere on the page (a click, a tap, a keypress — typing a
+// chat message included) and uses it to unlock audio retroactively, once, so
+// speech starts working without the visitor needing to find and click
+// anything in particular first.
+function unlockAudioOnce() {
+  presenter.resumeAudioPlayback?.();
+  document.removeEventListener("pointerdown", unlockAudioOnce);
+  document.removeEventListener("keydown", unlockAudioOnce);
+}
+document.addEventListener("pointerdown", unlockAudioOnce, { once: true });
+document.addEventListener("keydown", unlockAudioOnce, { once: true });

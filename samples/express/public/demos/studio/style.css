@@ -26,11 +26,21 @@ body {
     -apple-system,
     sans-serif;
   font-size: 16px;
-  background: #0f0f13;
-  color: #e8e8f0;
+  background: var(--surface-deep);
+  color: var(--text);
 }
 
-/* ── Tokens ────────────────────────────────────────────────────────────── */
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Tokens ──────────────────────────────────────────────────────────────
+   This :root block is the "Normal" theme — unchanged, the default. Every
+   other theme (theme.css, [data-theme="…"]) only overrides the tokens it
+   wants to change; anything it skips falls back to these values. Any new
+   control should read colors from these variables rather than hardcoding
+   them, so it picks up every theme for free. */
 
 :root {
   --accent: #7c6af7;
@@ -42,6 +52,15 @@ body {
   --border: #2e2e42;
   --text: #e8e8f0;
   --text-muted: #888;
+
+  /* The presenter stage and its overlays (debug timeline, hover preview) sit
+     on their own near-black backdrop regardless of theme, but still need to
+     shift with it rather than staying hardcoded — see .stage, .debug-panel. */
+  --stage-bg: #050508;
+  --stage-overlay-bg: rgba(5, 5, 8, 0.84);
+  --stage-overlay-border: rgba(255, 255, 255, 0.07);
+  --stage-overlay-text: #ffffff;
+  --stage-overlay-text-dim: rgba(255, 255, 255, 0.28);
 }
 
 /* ── Shared form elements ──────────────────────────────────────────────── */
@@ -187,27 +206,26 @@ button:disabled {
   min-height: 1.1em;
 }
 
-/* ── App layout ────────────────────────────────────────────────────────── */
+/* ── App header ──────────────────────────────────────────────────────────
+   Above #app, not inside .sidebar, so the sidebar-collapse button and theme
+   switcher stay reachable regardless of the sidebar's collapsed state. */
 
-#app {
-  display: grid;
-  grid-template-columns: 300px 1fr;
-  height: 100%;
-}
-
-/* ── Sidebar ───────────────────────────────────────────────────────────── */
-
-.sidebar {
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-  overflow-y: auto;
-}
-
-.sidebar-inner {
-  padding: 1.5rem;
+.app-header {
+  flex-shrink: 0;
   display: flex;
-  flex-direction: column;
-  gap: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.65rem 1.25rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.app-header-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
 }
 
 .brand {
@@ -216,14 +234,95 @@ button:disabled {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
-  margin-bottom: 0.25rem;
 }
 
 .demo-label {
-  font-size: 1.05rem;
+  font-size: 0.95rem;
   font-weight: 600;
   color: var(--text);
-  margin-bottom: 1.5rem;
+}
+
+.app-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.icon-btn {
+  width: auto;
+  flex-shrink: 0;
+  padding: 0.4rem 0.6rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.icon-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: transparent;
+}
+
+.theme-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.theme-picker-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.theme-picker select {
+  width: auto;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.82rem;
+}
+
+/* ── App layout ────────────────────────────────────────────────────────── */
+
+#app {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────
+   width (not the grid track) is what's animated — #app's first column is
+   "auto", so it just tracks whatever width .sidebar itself renders at. */
+
+.sidebar {
+  width: 280px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  overflow-x: hidden;
+  transition:
+    width 0.22s ease,
+    border-color 0.22s ease;
+}
+
+.sidebar.collapsed {
+  width: 0;
+  border-right-color: transparent;
+}
+
+.sidebar-inner {
+  /* Fixed regardless of the outer .sidebar's animated width, so content
+     doesn't reflow/squash mid-transition — it just gets progressively
+     clipped by .sidebar's own overflow:hidden as it shrinks to 0. */
+  width: 280px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 
 /* ── Sidebar sections ──────────────────────────────────────────────────── */
@@ -261,6 +360,247 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
+}
+
+/* ── Avatar / Scene carousels ──────────────────────────────────────────────
+   Replaces the old <select> as what the user actually sees; the <select>
+   itself stays in the DOM (hidden, via the [hidden] rule at the top of this
+   file) as the real state app.js reads/writes. */
+
+.carousel {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.carousel-track {
+  flex: 1;
+  display: flex;
+  gap: 0.55rem;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  padding: 0.15rem;
+  /* Firefox + WebKit scrollbar styling; a visible thin bar reads better here
+     than none at all, since the track is the primary way to browse. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.carousel-track::-webkit-scrollbar {
+  height: 5px;
+}
+.carousel-track::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+.carousel-card {
+  flex: 0 0 auto;
+  width: 84px;
+  scroll-snap-align: start;
+  background: var(--surface-deep);
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  padding: 0.4rem;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  transition:
+    border-color 0.15s,
+    transform 0.15s;
+}
+
+.carousel-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+  transform: translateY(-2px);
+}
+
+.carousel-card.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.carousel-card-thumb {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--surface);
+  display: block;
+}
+
+.carousel-card-thumb.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 1.4rem;
+}
+
+.carousel-card-label {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.68rem;
+  line-height: 1.3;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.carousel-card.active .carousel-card-label {
+  color: var(--text);
+}
+
+.carousel-nav {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--surface-deep);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 1rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.carousel-nav:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Voice list ────────────────────────────────────────────────────────────
+   A selectable list rather than a carousel (voices have no image), with a
+   hover-triggered audio preview — see previewVoice() in app.js. */
+
+.voice-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 220px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.voice-list::-webkit-scrollbar {
+  width: 5px;
+}
+.voice-list::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+.voice-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--surface-deep);
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.voice-item:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+.voice-item.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-deep));
+}
+
+.voice-item-preview-icon {
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+/* Only shown while that voice's preview is actually loading/playing — see
+   the "previewing" class toggled in app.js — rather than on every hover, so
+   it reads as feedback and not just a repeated decoration. */
+.voice-item.previewing .voice-item-preview-icon {
+  opacity: 1;
+  color: var(--accent);
+}
+
+/* ── Text visibility toggle ────────────────────────────────────────────────
+   A standard checkbox styled as a pill switch (no native <input type="range">
+   equivalent for on/off exists, so this is the usual CSS pattern for one). */
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.6rem;
+}
+
+.toggle-row-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 38px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.toggle-slider::before {
+  content: "";
+  position: absolute;
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  top: 3px;
+  background: var(--text);
+  border-radius: 50%;
+  transition: transform 0.15s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: var(--accent);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(16px);
+  background: #fff;
+}
+
+.toggle-switch input:focus-visible + .toggle-slider {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ── Chatbot ID display ─────────────────────────────────────────────────── */
@@ -701,16 +1041,202 @@ details[open] summary::before {
 
 .main {
   display: grid;
-  grid-template-rows: 1fr 240px;
+  /* Chat strip trimmed (was 210px) so the stage — 1fr, i.e. everything
+     left over — claims more of the vertical space for the avatar. */
+  grid-template-rows: 1fr 150px;
   overflow: hidden;
 }
 
+/* ── Stage toolbar ───────────────────────────────────────────────────────
+   Overlays .stage (position:absolute) instead of sitting in its own row, so
+   it reserves no layout space — .stage reclaims that height whenever the
+   toolbar is hidden, which is by default. Revealed only by .stage:hover
+   below; being a child of .stage means hovering the toolbar itself keeps
+   that same :hover true (a descendant's :hover doesn't break the
+   ancestor's), so moving from the avatar viewport onto the toolbar causes
+   no flicker — no JS required for that part. */
+
+.stage-toolbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.55rem 1.25rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  opacity: 0;
+  transform: translateY(-100%);
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+  pointer-events: none;
+}
+
+.stage:hover .stage-toolbar {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.stage-toggle {
+  gap: 0.5rem;
+  margin-bottom: 0;
+}
+
+.stage-toggle .toggle-row-label {
+  font-size: 0.78rem;
+}
+
+/* ── Stage controls: motion picker + framing select ─────────────────────
+   Persistent (not hover-gated like .stage-toolbar) — floats top-right. */
+
+.stage-controls {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 31;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.stage-float-btn {
+  width: auto;
+  min-height: 32px;
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  background: var(--stage-overlay-bg);
+  border: 1px solid var(--stage-overlay-border);
+  color: var(--stage-overlay-text);
+  font-size: 0.82rem;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.stage-float-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.stage-float-btn[aria-expanded="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.motion-picker {
+  position: relative;
+}
+
+.motion-picker-popup {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 32;
+  width: 220px;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 0.4rem;
+}
+
+.motion-picker-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 0.3rem 0.5rem;
+}
+
+.motion-picker-list {
+  list-style: none;
+}
+
+.motion-picker-item,
+.motion-picker-empty {
+  padding: 0.45rem 0.6rem;
+  font-size: 0.85rem;
+  border-radius: 5px;
+  color: var(--text);
+}
+
+.motion-picker-item {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.motion-picker-item:hover {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.motion-picker-empty {
+  color: var(--text-muted);
+  font-style: italic;
+  cursor: default;
+}
+
+.framing-select {
+  width: auto;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.82rem;
+  background: var(--stage-overlay-bg);
+  border: 1px solid var(--stage-overlay-border);
+  color: var(--stage-overlay-text);
+}
+
+/* ── Avatar framing (Face) ────────────────────────────────────────────────
+   CameraAngle only has two SDK presets (fullbody/halfbody — see
+   applyFraming() in app.js); "Face" has no matching preset, so it layers a
+   CSS zoom on top of Halfbody instead: scaling and shifting the presenter
+   element up within .stage's own overflow:hidden crops the frame down to
+   head + neck. This is the documented fallback for a framing the SDK has
+   no built-in camera preset for. */
+
+sv-presenter.framing-face {
+  /* Less zoom, and anchored higher (nearer the forehead/eye line of a
+     halfbody frame) than the first attempt — that one showed the mouth
+     instead of the whole face, i.e. too much scale anchored too low.
+     transform-origin alone handles the vertical shift; no separate
+     translateY needed on top of it. */
+  transform: scale(1.5);
+  transform-origin: center 18%;
+}
+
 /* ── Stage ─────────────────────────────────────────────────────────────── */
+/* Occupies all remaining space after the sidebar and chat strip — the
+   trimmed sidebar width and chat height above both exist to give this more
+   room, since making the avatar itself "bigger" means giving its frame more
+   space, not scaling the web component's own content. */
 
 .stage {
   position: relative;
-  background: #050508;
+  background: var(--stage-bg);
   overflow: hidden;
+  min-height: 480px;
+}
+
+/* Belt-and-suspenders containment for the presenter's own render surface
+   (and its internal #sv-cocos-host iframe, if the widget uses one) — the
+   "fullbody" framing has been seen rendering wider/taller than its
+   container in this app, and !important guards against that regardless of
+   whatever inline size or internal layout the third-party widget sets. */
+.stage sv-presenter,
+.stage sv-presenter #sv-cocos-host,
+#sv-cocos-host {
+  max-width: 100% !important;
+  max-height: 100% !important;
 }
 
 .placeholder {
@@ -724,6 +1250,62 @@ details[open] summary::before {
   font-size: 0.95rem;
   line-height: 1.6;
   pointer-events: none;
+}
+
+/* ── Hover preview overlay ─────────────────────────────────────────────────
+   Sits above the placeholder AND <sv-presenter> (higher z-index than the
+   debug panel below) while hovering an avatar/scene carousel card. Hiding it
+   touches no other state — whatever was already showing underneath (the
+   placeholder, or the live launched presenter) just reappears unchanged. */
+
+.hover-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--stage-bg);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.hover-preview-scene {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hover-preview-scene[hidden],
+.hover-preview-avatar[hidden] {
+  display: none;
+}
+
+.hover-preview-avatar {
+  position: relative;
+  max-width: 62%;
+  max-height: 80%;
+  object-fit: contain;
+  filter: drop-shadow(0 16px 34px rgba(0, 0, 0, 0.6));
+}
+
+.hover-preview-label {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  padding: 0.6rem 1rem;
+  font-size: 0.78rem;
+  color: var(--stage-overlay-text-dim);
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--stage-bg) 85%, transparent),
+    transparent
+  );
+  text-align: center;
 }
 
 /* ── Debug timeline panel ──────────────────────────────────────────────── */
@@ -744,10 +1326,10 @@ details[open] summary::before {
   left: 0;
   right: 0;
   max-height: 192px;
-  background: rgba(5, 5, 8, 0.84);
+  background: var(--stage-overlay-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 1px solid var(--stage-overlay-border);
   z-index: 10;
   display: flex;
   flex-direction: column;
@@ -758,7 +1340,7 @@ details[open] summary::before {
   align-items: center;
   justify-content: space-between;
   padding: 0.3rem 0.8rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--stage-overlay-border);
   flex-shrink: 0;
 }
 
@@ -767,14 +1349,14 @@ details[open] summary::before {
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.28);
+  color: var(--stage-overlay-text-dim);
 }
 
 .debug-clear-btn {
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--stage-overlay-border);
   border-radius: 4px;
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--stage-overlay-text-dim);
   font-size: 0.65rem;
   padding: 0.12rem 0.5rem;
   cursor: pointer;
@@ -784,8 +1366,8 @@ details[open] summary::before {
 }
 
 .debug-clear-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.55);
+  background: color-mix(in srgb, var(--stage-overlay-text) 6%, transparent);
+  color: var(--stage-overlay-text);
 }
 
 .debug-log {
@@ -799,7 +1381,7 @@ details[open] summary::before {
   width: 3px;
 }
 .debug-log::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--stage-overlay-text) 8%, transparent);
 }
 
 .debug-entry {
@@ -823,7 +1405,7 @@ details[open] summary::before {
   width: 7.5ch;
   font-family: "SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace;
   font-size: 0.62rem;
-  color: rgba(255, 255, 255, 0.18);
+  color: color-mix(in srgb, var(--stage-overlay-text) 18%, transparent);
 }
 
 .debug-msg {
@@ -832,7 +1414,7 @@ details[open] summary::before {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba(255, 255, 255, 0.6);
+  color: color-mix(in srgb, var(--stage-overlay-text) 60%, transparent);
 }
 
 /* Per-type accent colours */
@@ -940,6 +1522,63 @@ details[open] summary::before {
   border-bottom-left-radius: 3px;
 }
 
+/* ── Persona buttons ───────────────────────────────────────────────────── */
+
+.persona-buttons,
+.persona-chips {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+.persona-btn,
+.persona-chip {
+  flex: 1;
+  width: auto;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border-radius: 6px;
+  background: var(--surface-deep);
+  border: 1px solid var(--border);
+  color: var(--text);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+  line-height: 1.2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.persona-btn:hover:not(:disabled),
+.persona-chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-deep));
+  color: #fff;
+}
+
+.persona-btn.active,
+.persona-chip.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.persona-btn:disabled,
+.persona-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* ── Chat input row ────────────────────────────────────────────────────── */
 
 .chat-input-row {
@@ -1001,6 +1640,273 @@ details[open] summary::before {
   margin-top: 0.35rem;
 }
 
+/* ── Live Mode & Audio Listening Animation ────────────────────────────────── */
+
+.chat-input-row .live-mode-btn {
+  padding: 0.6rem 0.85rem;
+  background: var(--surface-deep);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.chat-input-row .live-mode-btn:hover:not(:disabled) {
+  border-color: #10b981;
+  color: #fff;
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #64748b;
+  display: inline-block;
+  transition: background 0.2s, box-shadow 0.2s;
+  flex-shrink: 0;
+}
+
+.live-mode-btn.active {
+  background: color-mix(in srgb, #10b981 18%, var(--surface-deep));
+  border-color: #10b981;
+  color: #fff;
+  box-shadow: 0 0 12px color-mix(in srgb, #10b981 35%, transparent);
+}
+
+.live-mode-btn.active .live-dot {
+  background: #10b981;
+  animation: live-dot-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes live-dot-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+  }
+}
+
+/* ── Audio Listening Panel ───────────────────────────────────────────────── */
+
+.audio-listening-panel {
+  margin: 0.45rem 0 0.6rem 0;
+  padding: 0.6rem 0.85rem;
+  background: color-mix(in srgb, var(--surface-deep) 88%, transparent);
+  border: 1px solid color-mix(in srgb, #38bdf8 45%, var(--border));
+  border-radius: 8px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
+  animation: listening-slide-in 0.25s ease-out;
+}
+
+.audio-listening-panel[hidden] {
+  display: none !important;
+}
+
+@keyframes listening-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.listening-anim-content {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  min-width: 0;
+}
+
+.listening-pulse-indicator {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.listening-pulse-indicator .pulse-ring {
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 2px solid #38bdf8;
+  animation: listening-ring-expand 1.3s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+}
+
+.listening-pulse-indicator .pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #38bdf8;
+}
+
+@keyframes listening-ring-expand {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+.audio-wave-bars {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.audio-wave-bars .wave-bar {
+  width: 3.5px;
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #38bdf8 0%, #818cf8 55%, #c084fc 100%);
+  animation: wave-bounce 1s ease-in-out infinite;
+  transform-origin: bottom center;
+}
+
+.audio-wave-bars .bar-1 { animation-delay: 0.05s; }
+.audio-wave-bars .bar-2 { animation-delay: 0.35s; }
+.audio-wave-bars .bar-3 { animation-delay: 0.18s; }
+.audio-wave-bars .bar-4 { animation-delay: 0.45s; }
+.audio-wave-bars .bar-5 { animation-delay: 0.12s; }
+.audio-wave-bars .bar-6 { animation-delay: 0.38s; }
+.audio-wave-bars .bar-7 { animation-delay: 0.22s; }
+.audio-wave-bars .bar-8 { animation-delay: 0.48s; }
+.audio-wave-bars .bar-9 { animation-delay: 0.28s; }
+
+@keyframes wave-bounce {
+  0%, 100% {
+    height: 5px;
+    opacity: 0.65;
+  }
+  50% {
+    height: 22px;
+    opacity: 1;
+    filter: drop-shadow(0 0 4px rgba(129, 140, 248, 0.7));
+  }
+}
+
+.listening-label-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.listening-status-text {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #38bdf8;
+  letter-spacing: 0.02em;
+}
+
+.listening-interim-text {
+  font-size: 0.78rem;
+  color: var(--text-dim, #94a3b8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Stage listening HUD ─────────────────────────────────────────────────── */
+
+.stage-listening-hud {
+  position: absolute;
+  bottom: 1.2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  box-shadow: 0 4px 22px rgba(0, 0, 0, 0.5);
+  border-radius: 9999px;
+  padding: 0.4rem 0.95rem;
+  color: #f8fafc;
+  font-size: 0.82rem;
+  font-weight: 500;
+  pointer-events: none;
+  animation: listening-slide-in 0.25s ease-out;
+}
+
+.stage-listening-hud[hidden] {
+  display: none !important;
+}
+
+.stage-hud-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #38bdf8;
+  box-shadow: 0 0 8px #38bdf8;
+  animation: live-dot-pulse 1.2s infinite;
+  flex-shrink: 0;
+}
+
+.stage-hud-icon {
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.stage-hud-bars {
+  display: flex;
+  align-items: center;
+  gap: 2.5px;
+  height: 16px;
+}
+
+.stage-hud-bars .hud-bar {
+  width: 2.5px;
+  height: 4px;
+  border-radius: 2px;
+  background: #38bdf8;
+  animation: hud-bounce 0.8s ease-in-out infinite;
+  transform-origin: bottom center;
+}
+
+.stage-hud-bars .bar-1 { animation-delay: 0.05s; }
+.stage-hud-bars .bar-2 { animation-delay: 0.25s; }
+.stage-hud-bars .bar-3 { animation-delay: 0.15s; }
+.stage-hud-bars .bar-4 { animation-delay: 0.35s; }
+.stage-hud-bars .bar-5 { animation-delay: 0.2s; }
+
+@keyframes hud-bounce {
+  0%, 100% {
+    height: 4px;
+    opacity: 0.7;
+  }
+  50% {
+    height: 14px;
+    opacity: 1;
+  }
+}
+
+.stage-hud-text {
+  font-size: 0.78rem;
+  color: #e2e8f0;
+  letter-spacing: 0.01em;
+}
+
 /* ── Narrow viewports ─────────────────────────────────────────────────────
    Studio is a console and assumes a desktop, but "assumes a desktop" is not
    the same as "breaks below one" — at 300px + 1fr the sidebar squeezes the
@@ -1018,12 +1924,23 @@ details[open] summary::before {
     min-height: 100%;
   }
   .sidebar {
+    /* Overrides the fixed 280px used to animate the desktop collapse — full
+       width when stacked, same as before that was introduced. */
+    width: auto;
     border-right: 0;
     border-bottom: 1px solid var(--border);
     overflow-y: visible;
   }
+  .sidebar.collapsed {
+    width: auto;
+    height: 0;
+    border-bottom-color: transparent;
+  }
+  .sidebar-inner {
+    width: auto;
+  }
   .main {
-    grid-template-rows: auto auto;
+    grid-template-rows: auto auto auto;
     overflow: visible;
   }
   .stage {

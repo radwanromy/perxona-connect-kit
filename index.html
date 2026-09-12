@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Perxona Avatar Studio — Hackvatar</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- ── Nav ─────────────────────────────────────────────────────────── -->
+    <header class="site-header">
+      <div class="container header-inner">
+        <a href="#top" class="brand">
+          <span class="brand-mark">◆</span>
+          <span>Perxona Avatar Studio</span>
+        </a>
+        <nav class="nav-links">
+          <a href="#services">Services</a>
+          <a href="#top">Demo</a>
+        </nav>
+      </div>
+    </header>
+
+    <!-- ── Hero ────────────────────────────────────────────────────────── -->
+    <section id="top" class="hero">
+      <div class="container hero-inner">
+        <div class="hero-copy">
+          <p class="eyebrow">Hackvatar · Built on Perxona Connect Kit</p>
+          <h1>
+            Give your product a face that
+            <span class="text-glow">talks back</span>.
+          </h1>
+          <p class="hero-sub">
+            A live, speaking AI avatar — powered by the Perxona Connect API —
+            dropped straight into your app. Below is where it lives.
+          </p>
+          <div class="hero-actions">
+            <a href="#services" class="btn btn-primary">See the avatars</a>
+            <a
+              href="https://github.com/radwanromy/perxona-connect-kit"
+              class="btn btn-ghost"
+              target="_blank"
+              rel="noopener"
+              >View source</a
+            >
+          </div>
+        </div>
+
+        <div class="hero-stage">
+          <!--
+            ── SV-PRESENTER INJECTION POINT ──────────────────────────────
+            Mount the Perxona Connect Kit <sv-presenter> avatar Web
+            Component here. To wire it up (see samples/express for the
+            full pattern):
+
+              1. Fetch GET /api/config from your Connect Kit server to get
+                 { presenterUrl, fixedTarget, chatbotId }.
+              2. Dynamically append a <script type="module" src={presenterUrl}>
+                 to <head> (this registers the <sv-presenter> custom element).
+              3. Replace this placeholder <div> with:
+                   <sv-presenter style="width:100%; height:100%"></sv-presenter>
+              4. Call presenter.initializeWithConnectKey(connectKey, fixedTarget)
+                 from a user gesture (e.g. a "Launch" button click) — audio
+                 playback cannot start without one.
+
+            Until then, this box is just a placeholder frame.
+          -->
+          <div id="sv-presenter-mount" class="presenter-placeholder">
+            <div class="presenter-placeholder-glow" aria-hidden="true"></div>
+            <p class="presenter-placeholder-label">
+              &lt;sv-presenter&gt;<br />mount point
+            </p>
+          </div>
+          <!-- ── END SV-PRESENTER INJECTION POINT ─────────────────────── -->
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Services ────────────────────────────────────────────────────── -->
+    <section id="services" class="services">
+      <div class="container">
+        <div class="section-heading">
+          <p class="eyebrow">What we're building</p>
+          <h2>Our Avatar Services</h2>
+          <p class="section-sub">
+            Three ways a talking avatar changes how people work with an app.
+          </p>
+        </div>
+
+        <div class="services-grid">
+          <!-- Service 1 -->
+          <article class="service-card">
+            <div class="service-icon" aria-hidden="true">🦆</div>
+            <h3>The 'Rubber Duck' Senior Cloud Architect</h3>
+            <p class="service-tagline">
+              Talk through your architecture out loud — it listens, sketches,
+              and pushes back.
+            </p>
+            <ul class="service-features">
+              <li>Voice-to-text brainstorming</li>
+              <li>Dynamic architecture diagram backgrounds</li>
+              <li>Manual motion-directed logic validation</li>
+            </ul>
+          </article>
+
+          <!-- Service 2 -->
+          <article class="service-card">
+            <div class="service-icon" aria-hidden="true">🚗</div>
+            <h3>The Interactive Driving Instructor</h3>
+            <p class="service-tagline">
+              A hands-free co-pilot that knows the rules of the road — and
+              your policy paperwork.
+            </p>
+            <ul class="service-features">
+              <li>Hands-free passenger simulation</li>
+              <li>
+                'Brand and Brain' document retrieval for toll/insurance
+                policies
+              </li>
+              <li>Verbal scenario quizzing</li>
+            </ul>
+          </article>
+
+          <!-- Service 3 -->
+          <article class="service-card">
+            <div class="service-icon" aria-hidden="true">📈</div>
+            <h3>The Real-Time Equity Analyst</h3>
+            <p class="service-tagline">
+              Live market data, spoken plainly — ask it anything about the
+              chart on screen.
+            </p>
+            <ul class="service-features">
+              <li>MCP live data integration</li>
+              <li>Automated Behavior AI market reactions</li>
+              <li>Conversational chart analysis</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Footer ──────────────────────────────────────────────────────── -->
+    <footer class="site-footer">
+      <div class="container">
+        <p>Built for Hackvatar with Perxona Connect Kit.</p>
+      </div>
+    </footer>
+  </body>
+</html>

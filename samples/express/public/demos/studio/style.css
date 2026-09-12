@@ -973,6 +973,14 @@ details[open] summary::before {
   border-color: var(--accent);
 }
 
+/* Higher specificity than ".mic-btn:hover:not(:disabled)" above (two classes
+   + a pseudo-class beats one class + a pseudo-class + :not), so the red
+   "listening" border wins over the purple hover border while the button
+   sits under the cursor — which it always does right after being clicked. */
+.mic-btn.listening:hover:not(:disabled) {
+  border-color: var(--danger);
+}
+
 .mic-btn.listening {
   background: color-mix(in srgb, var(--danger) 18%, transparent);
   border-color: var(--danger);

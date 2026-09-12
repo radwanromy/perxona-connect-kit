@@ -328,6 +328,15 @@
                 placeholder="Ask the chatbot…"
                 autocomplete="off"
               />
+              <button
+                type="button"
+                id="mic-btn"
+                class="mic-btn"
+                title="Voice input"
+                aria-label="Start voice input"
+              >
+                🎤
+              </button>
               <button type="submit" id="chat-send-btn" disabled>Send</button>
               <button
                 type="button"
@@ -338,6 +347,7 @@
                 Stop
               </button>
             </form>
+            <p id="mic-status" class="field-hint mic-status"></p>
           </div>
         </div>
       </main>

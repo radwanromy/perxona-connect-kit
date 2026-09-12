@@ -115,6 +115,8 @@ const chatForm = document.getElementById("chat-form");
 const chatInput = document.getElementById("chat-input");
 const chatSendBtn = document.getElementById("chat-send-btn");
 const chatStopBtn = document.getElementById("chat-stop-btn");
+const micBtn = document.getElementById("mic-btn");
+const micStatus = document.getElementById("mic-status");
 
 // Source switch
 const sourceRadios = document.querySelectorAll('input[name="source"]');
@@ -938,9 +940,19 @@ const toConnectMessages = (turns) =>
 const toOpenAiMessages = (turns) =>
   turns.map(({ role, text }) => ({ role, content: text }));
 
-chatForm.addEventListener("submit", async (e) => {
+chatForm.addEventListener("submit", (e) => {
   e.preventDefault();
-  const text = chatInput.value.trim();
+  submitChatMessage(chatInput.value.trim());
+});
+
+/**
+ * Send `text` through the active source (Connect chatbot or own LLM) and hand
+ * the reply to the presenter. The one path both typed submissions and voice
+ * input go through — voice input just populates chatInput and calls this same
+ * function instead of getting its own copy of this flow.
+ * @param {string} text
+ */
+async function submitChatMessage(text) {
   if (!text || !canSend()) return;
 
   chatInput.value = "";
@@ -1053,7 +1065,131 @@ chatForm.addEventListener("submit", async (e) => {
     setAwaitingReply(false);
     if (!queued) setSpeaking(false);
   }
-});
+}
+
+// ── Voice input (Web Speech API) ──────────────────────────────────────────
+//
+// Connect Kit has no speech-to-text API of its own, so this uses the
+// browser's native SpeechRecognition — free, no extra credentials, but
+// Chrome/Edge only (not Firefox). Feature-detected below: on an unsupported
+// browser the mic button just doesn't appear, and typed input is unaffected
+// either way.
+
+const SpeechRecognitionImpl =
+  window.SpeechRecognition || window.webkitSpeechRecognition;
+const micSupported = Boolean(SpeechRecognitionImpl);
+
+/** True while recognition is actively listening (button shows the "stop" state). */
+let isListening = false;
+/** Accumulated final-result text for the current listening session. */
+let finalTranscript = "";
+/**
+ * Set by the 'error' event, read by 'end' right after — 'end' always fires
+ * after 'error' (per the Web Speech spec), and it's 'end' that decides
+ * whether to auto-send. An error (denied mic, no speech heard) means there is
+ * nothing usable to send.
+ */
+let micErrorCode = null;
+
+function setMicStatus(text) {
+  micStatus.textContent = text;
+}
+
+if (!micSupported) {
+  micBtn.hidden = true;
+  setMicStatus(
+    "Voice input isn't supported in this browser — try Chrome or Edge. Typing still works.",
+  );
+} else {
+  const recognition = new SpeechRecognitionImpl();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = navigator.language || "en-US";
+
+  recognition.addEventListener("start", () => {
+    isListening = true;
+    micErrorCode = null;
+    micBtn.classList.add("listening");
+    micBtn.title = "Stop voice input";
+    micBtn.setAttribute("aria-label", "Stop voice input");
+    setMicStatus("Listening…");
+    syncChatControls();
+  });
+
+  // Fires repeatedly as speech comes in. Interim segments repaint the input
+  // live; only 'isFinal' segments are kept once the session ends (see 'end').
+  recognition.addEventListener("result", (e) => {
+    let interim = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const result = e.results[i];
+      if (result.isFinal) finalTranscript += result[0].transcript;
+      else interim += result[0].transcript;
+    }
+    chatInput.value = (finalTranscript + interim).trim();
+  });
+
+  // continuous mode keeps the mic open across brief pauses on its own — this
+  // is what makes "stop on a natural pause" actually happen, instead of
+  // listening forever until the button is clicked again.
+  recognition.addEventListener("speechend", () => {
+    recognition.stop();
+  });
+
+  recognition.addEventListener("error", (e) => {
+    micErrorCode = e.error;
+    if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+      setMicStatus(
+        "Microphone access denied — allow it in your browser's site settings to use voice input.",
+      );
+    } else if (e.error === "no-speech") {
+      setMicStatus("No speech detected.");
+    } else if (e.error !== "aborted") {
+      // 'aborted' is just the user's own stop click — not worth surfacing.
+      setMicStatus(`Voice input error: ${e.error}`);
+    }
+  });
+
+  recognition.addEventListener("end", () => {
+    isListening = false;
+    micBtn.classList.remove("listening");
+    micBtn.title = "Voice input";
+    micBtn.setAttribute("aria-label", "Start voice input");
+    syncChatControls();
+
+    const text = finalTranscript.trim();
+    finalTranscript = "";
+
+    // An error (denied mic, no speech) already has its message on screen and
+    // produced nothing usable to send — leave it there rather than sending
+    // or silently clearing it out from under the user.
+    if (micErrorCode) {
+      micErrorCode = null;
+      return;
+    }
+
+    setMicStatus("");
+    if (!text) return; // stopped with nothing transcribed — back to idle, no empty send
+    chatInput.value = text;
+    submitChatMessage(text);
+  });
+
+  micBtn.addEventListener("click", () => {
+    if (isListening) {
+      recognition.stop();
+      return;
+    }
+    setMicStatus("");
+    finalTranscript = "";
+    try {
+      recognition.start();
+    } catch {
+      // start() throws if a session is already active — the disabled state
+      // from syncChatControls() already prevents this in practice, so this
+      // is just a defensive fallback, not an expected path.
+      setMicStatus("Could not start voice input.");
+    }
+  });
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -1127,6 +1263,9 @@ function syncChatControls() {
   chatStopBtn.disabled = !isSpeaking;
   chatSendBtn.disabled = busy || !canSend();
   chatInput.disabled = busy;
+  // Same gate as Send, except while actively listening — that state must stay
+  // clickable so the button can also act as Stop.
+  if (micSupported) micBtn.disabled = !isListening && (busy || !canSend());
 }
 
 function setStatus(text) {

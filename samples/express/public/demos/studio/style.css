@@ -958,6 +958,41 @@ details[open] summary::before {
   padding: 0.6rem 1.1rem;
 }
 
+/* Scoped to .chat-input-row .mic-btn (not just .mic-btn) so this wins over
+   the more specific ".chat-input-row button" padding rule above. */
+.chat-input-row .mic-btn {
+  padding: 0.6rem 0.9rem;
+  background: var(--surface-deep);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.mic-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.mic-btn.listening {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  border-color: var(--danger);
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes mic-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--danger) 0%, transparent);
+  }
+}
+
+.mic-status {
+  margin-top: 0.35rem;
+}
+
 /* ── Narrow viewports ─────────────────────────────────────────────────────
    Studio is a console and assumes a desktop, but "assumes a desktop" is not
    the same as "breaks below one" — at 300px + 1fr the sidebar squeezes the

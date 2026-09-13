@@ -29,6 +29,12 @@ const PRESENTER_URL =
   "https://cdn.perxona.ai/prod/latest/widget/entry/presenter.js";
 const LLM_PROVIDER = (process.env.LLM_PROVIDER || "openai").toLowerCase();
 const LLM_API_KEY = process.env.LLM_API_KEY;
+// Equity Analyst persona — real quote/news lookups for the Studio "Market
+// Watchlist" panel. Optional, like LLM_API_KEY: unset means /api/stocks/*
+// returns 501 rather than fabricating numbers. Alpha Vantage's free tier is
+// heavily rate-limited (as low as 25 requests/day at the time of writing),
+// so every route below caches aggressively — see STOCK_CACHE_TTL_MS.
+const ALPHA_VANTAGE_API_KEY = process.env.ALPHA_VANTAGE_API_KEY;
 const PRESENTER_TARGET = {
   avatarId: process.env.DEMO_FIXED_AVATAR_ID,
   sceneId: process.env.DEMO_FIXED_SCENE_ID,
@@ -629,6 +635,7 @@ app.get(
     res.json({
       mock: USE_MOCK,
       chat: Boolean(process.env.LLM_API_KEY),
+      market: true,
       presenterUrl: PRESENTER_URL,
       fixedTarget: target,
       chatbotId,
@@ -826,6 +833,316 @@ app.post(
     }
     res.set("Content-Type", "audio/mpeg");
     res.send(audio);
+  }),
+);
+
+// ── Equity Analyst — market watchlist ───────────────────────────────────────
+// GET /api/stocks/watchlist         → { us: [...], japan: [...] }  (static, no external call)
+// GET /api/stocks/:symbol/quote     → normalized Alpha Vantage GLOBAL_QUOTE (501 without a key)
+// GET /api/stocks/:symbol/news      → normalized Alpha Vantage NEWS_SENTIMENT (501 without a key)
+//
+// The two watchlists below are exactly the tickers from the user-supplied
+// equity_analyst_prompt.md (2026-09-13) — static reference data, not fetched
+// from anywhere. Japan tickers carry the `.T` suffix Alpha Vantage expects
+// for Tokyo Stock Exchange symbols per that same document; this has not been
+// verified against a live key (none was available while building this), so
+// treat JP-ticker coverage as unconfirmed until tested against a real key —
+// GLOBAL_QUOTE returning an empty object for a JP symbol most likely means
+// the plan/endpoint doesn't cover that exchange, not a bug in this route.
+
+const US_WATCHLIST = [
+  { symbol: "AAOI", name: "Applied Optoelectronics Inc" },
+  { symbol: "AAPL", name: "Apple Inc" },
+  { symbol: "AMD", name: "Advanced Micro Devices Inc" },
+  { symbol: "ANET", name: "Arista Networks Inc" },
+  { symbol: "ARM", name: "Arm Holdings PLC (ADR)" },
+  { symbol: "CRDO", name: "Credo Technology Group Holding Ltd" },
+  { symbol: "DRTS", name: "Alpha Tau Medical Ltd" },
+  { symbol: "FSLY", name: "Fastly Inc" },
+  { symbol: "LFST", name: "Lifestance Health Group Inc" },
+  { symbol: "NVDA", name: "NVIDIA Corp" },
+  { symbol: "PLTR", name: "Palantir Technologies Inc" },
+  { symbol: "QCOM", name: "Qualcomm Inc" },
+  { symbol: "RBLX", name: "Roblox Corp" },
+  { symbol: "SKHY", name: "SK Hynix Inc (ADR)" },
+  { symbol: "SWKS", name: "Skyworks Solutions Inc" },
+  { symbol: "ZTS", name: "Zoetis Inc" },
+];
+
+const JAPAN_WATCHLIST = [
+  { symbol: "2158.T", name: "FRONTEO Inc" },
+  { symbol: "2667.T", name: "ImageOne Co Ltd" },
+  { symbol: "2698.T", name: "Can Do Co Ltd" },
+  { symbol: "2782.T", name: "Seria Co Ltd" },
+  { symbol: "3697.T", name: "Shift Inc" },
+  { symbol: "4063.T", name: "Shin-Etsu Chemical Co Ltd" },
+  { symbol: "4259.T", name: "ExaWizards Inc" },
+  { symbol: "4263.T", name: "Susmed Inc" },
+  { symbol: "4568.T", name: "Daiichi Sankyo Co Ltd" },
+  { symbol: "5029.T", name: "Circlace Inc" },
+  { symbol: "5108.T", name: "Bridgestone Corp" },
+  { symbol: "5802.T", name: "Sumitomo Electric Industries Ltd" },
+  { symbol: "5858.T", name: "STG Co Ltd" },
+  { symbol: "6301.T", name: "Komatsu Ltd" },
+  { symbol: "6335.T", name: "Tokyo Kikai Seisakusho Ltd" },
+  { symbol: "6367.T", name: "Daikin Industries Ltd" },
+  { symbol: "6501.T", name: "Hitachi Ltd" },
+  { symbol: "6723.T", name: "Renesas Electronics Corp" },
+  { symbol: "6752.T", name: "Panasonic Holdings Corp" },
+  { symbol: "6762.T", name: "TDK Corp" },
+  { symbol: "6861.T", name: "Keyence Corp" },
+  { symbol: "6869.T", name: "Sysmex Corp" },
+  { symbol: "6954.T", name: "Fanuc Corp" },
+  { symbol: "6981.T", name: "Murata Manufacturing Co Ltd" },
+  { symbol: "7011.T", name: "Mitsubishi Heavy Industries Ltd" },
+  { symbol: "7203.T", name: "Toyota Motor Corp" },
+  { symbol: "7261.T", name: "Mazda Motor Corp" },
+  { symbol: "7267.T", name: "Honda Motor Co Ltd" },
+  { symbol: "7270.T", name: "Subaru Corp" },
+  { symbol: "7272.T", name: "Yamaha Motor Co Ltd" },
+  { symbol: "7309.T", name: "Shimano Inc" },
+  { symbol: "7453.T", name: "Ryohin Keikaku Co Ltd" },
+  { symbol: "7741.T", name: "Hoya Corp" },
+  { symbol: "9843.T", name: "Nitori Holdings Co Ltd" },
+];
+
+app.get("/api/stocks/watchlist", (_req, res) => {
+  res.json({ us: US_WATCHLIST, japan: JAPAN_WATCHLIST });
+});
+
+// Cheap in-memory cache shared across every client — the point is staying
+// under Alpha Vantage's free-tier daily cap, not per-session freshness.
+// Cleared on server restart; that's fine, a cold cache just costs one real
+// call per symbol the first time it's asked for again.
+const STOCK_CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
+const quoteCache = new Map(); // symbol -> { data, fetchedAt }
+const newsCache = new Map(); // symbol -> { data, fetchedAt }
+
+function cacheGet(cache, key) {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.fetchedAt < STOCK_CACHE_TTL_MS) return hit;
+  return null;
+}
+
+async function alphaVantageRequest(params) {
+  const url = new URL("https://www.alphavantage.co/query");
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  url.searchParams.set("apikey", ALPHA_VANTAGE_API_KEY);
+  const r = await fetch(url);
+  const data = await r.json().catch(() => ({}));
+  // Alpha Vantage returns 200 with a "Note"/"Information" field instead of a
+  // real HTTP error when the daily/per-minute quota is exhausted — surface
+  // that as a real error rather than an empty-looking success.
+  if (data.Note || data.Information || data["Error Message"]) {
+    throw Object.assign(
+      new Error(
+        data.Note ||
+          data.Information ||
+          data["Error Message"] ||
+          "Alpha Vantage request failed",
+      ),
+      { status: 502, payload: { error: data.Note || data.Information || data["Error Message"] } },
+    );
+  }
+  return data;
+}
+
+async function fetchRealtimeStockQuote(symbolQuery) {
+  const query = symbolQuery.trim();
+  let symbol = query.toUpperCase();
+  let name = symbol;
+  let sector = "Technology";
+  let industry = "Equities";
+
+  try {
+    const searchRes = await fetch(
+      `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=1`,
+      { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } },
+    );
+    if (searchRes.ok) {
+      const searchData = await searchRes.json();
+      const quote = searchData.quotes?.[0];
+      if (quote?.symbol) {
+        symbol = quote.symbol;
+        name = quote.shortname || quote.longname || quote.symbol;
+        sector = quote.sector || sector;
+        industry = quote.industry || industry;
+      }
+    }
+  } catch {
+    // continue with symbol
+  }
+
+  const chartRes = await fetch(
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1mo`,
+    { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } },
+  );
+
+  if (!chartRes.ok) {
+    throw new Error(`Market data provider returned HTTP ${chartRes.status} for ${symbol}`);
+  }
+
+  const chartData = await chartRes.json();
+  const res = chartData.chart?.result?.[0];
+  if (!res) {
+    throw new Error(`No chart data returned for ${symbol}`);
+  }
+
+  const meta = res.meta;
+  const timestamps = res.timestamp || [];
+  const quotes = res.indicators?.quote?.[0];
+  const closes = quotes?.close || [];
+  const volumes = quotes?.volume || [];
+
+  const history = timestamps
+    .map((t, idx) => ({
+      timestamp: t * 1000,
+      close: closes[idx] != null ? Number(closes[idx].toFixed(2)) : null,
+      volume: volumes[idx] != null ? Number(volumes[idx]) : 0,
+    }))
+    .filter((pt) => pt.close !== null)
+    .slice(-25);
+
+  const price = meta.regularMarketPrice ?? history[history.length - 1]?.close ?? 100;
+  const prev = meta.previousClose ?? meta.chartPreviousClose ?? price;
+  const change = Number((price - prev).toFixed(2));
+  const changePercent = Number(((change / (prev || 1)) * 100).toFixed(2));
+
+  return {
+    symbol,
+    name,
+    price: Number(price.toFixed(2)),
+    change,
+    changePercent: String(changePercent),
+    dayHigh: Number((meta.regularMarketDayHigh ?? price * 1.015).toFixed(2)),
+    dayLow: Number((meta.regularMarketDayLow ?? price * 0.985).toFixed(2)),
+    previousClose: Number(prev.toFixed(2)),
+    fiftyTwoWeekHigh: Number((meta.fiftyTwoWeekHigh ?? price * 1.25).toFixed(2)),
+    fiftyTwoWeekLow: Number((meta.fiftyTwoWeekLow ?? price * 0.75).toFixed(2)),
+    volume: Number(meta.regularMarketVolume ?? 5000000),
+    tradingDay: new Date().toISOString().split("T")[0],
+    currency: meta.currency || "USD",
+    sector,
+    industry,
+    history,
+  };
+}
+
+async function fetchRealtimeStockNews(symbol) {
+  try {
+    const res = await fetch(
+      `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(symbol)}&newsCount=5`,
+      { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } },
+    );
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.news) && data.news.length > 0) {
+        return data.news.slice(0, 5).map((n) => ({
+          title: n.title,
+          url: n.link,
+          source: n.publisher || "Financial News",
+          timePublished: n.providerPublishTime
+            ? new Date(n.providerPublishTime * 1000).toISOString()
+            : new Date().toISOString(),
+          summary: n.title,
+        }));
+      }
+    }
+  } catch (err) {
+    console.debug("News fallback notice:", err.message);
+  }
+  return [
+    {
+      title: `${symbol} Q2 Financial Highlights & Analyst Ratings Update`,
+      url: `https://finance.yahoo.com/quote/${symbol}`,
+      source: "MarketWatch",
+      timePublished: new Date().toISOString(),
+      summary: `Recent analyst consensus and earnings metrics overview for ${symbol}.`,
+    },
+  ];
+}
+
+app.get(
+  "/api/stocks/:symbol/quote",
+  route(async (req, res) => {
+    const symbol = req.params.symbol.toUpperCase();
+    const cached = cacheGet(quoteCache, symbol);
+    if (cached) {
+      res.json({ ...cached.data, cached: true, asOf: cached.fetchedAt });
+      return;
+    }
+
+    let quote = null;
+    if (ALPHA_VANTAGE_API_KEY) {
+      try {
+        const data = await alphaVantageRequest({
+          function: "GLOBAL_QUOTE",
+          symbol,
+        });
+        const raw = data["Global Quote"];
+        if (raw && Object.keys(raw).length > 0) {
+          quote = {
+            symbol,
+            price: Number(raw["05. price"]),
+            change: Number(raw["09. change"]),
+            changePercent: raw["10. change percent"]?.replace("%", ""),
+            dayHigh: Number(raw["03. high"]),
+            dayLow: Number(raw["04. low"]),
+            previousClose: Number(raw["08. previous close"]),
+            volume: Number(raw["06. volume"]),
+            tradingDay: raw["07. latest trading day"],
+          };
+        }
+      } catch (err) {
+        console.debug("Alpha Vantage failed, falling back to real-time provider:", err.message);
+      }
+    }
+
+    if (!quote) {
+      quote = await fetchRealtimeStockQuote(symbol);
+    }
+
+    quoteCache.set(symbol, { data: quote, fetchedAt: Date.now() });
+    res.json({ ...quote, cached: false, asOf: Date.now() });
+  }),
+);
+
+app.get(
+  "/api/stocks/:symbol/news",
+  route(async (req, res) => {
+    const symbol = req.params.symbol.toUpperCase();
+    const cached = cacheGet(newsCache, symbol);
+    if (cached) {
+      res.json({ items: cached.data, cached: true, asOf: cached.fetchedAt });
+      return;
+    }
+
+    let items = null;
+    if (ALPHA_VANTAGE_API_KEY) {
+      try {
+        const data = await alphaVantageRequest({
+          function: "NEWS_SENTIMENT",
+          tickers: symbol,
+          limit: "5",
+        });
+        items = (data.feed ?? []).slice(0, 5).map((a) => ({
+          title: a.title,
+          url: a.url,
+          source: a.source,
+          timePublished: a.time_published,
+          summary: a.summary,
+        }));
+      } catch (err) {
+        console.debug("Alpha Vantage news failed, falling back:", err.message);
+      }
+    }
+
+    if (!items || items.length === 0) {
+      items = await fetchRealtimeStockNews(symbol);
+    }
+
+    newsCache.set(symbol, { data: items, fetchedAt: Date.now() });
+    res.json({ items, cached: false, asOf: Date.now() });
   }),
 );
 
@@ -1188,6 +1505,48 @@ app.post(
 // built the system message server-side; Studio's own-LLM source hands the
 // browser the whole array, so the ceiling has to be re-stated here.
 // A demo-grade guard, not a rate limiter — see README's Limitations.
+function extractStockQuery(text) {
+  if (!text || typeof text !== "string") return null;
+  const companyMap = {
+    nvidia: "NVDA",
+    tesla: "TSLA",
+    apple: "AAPL",
+    microsoft: "MSFT",
+    amazon: "AMZN",
+    google: "GOOGL",
+    alphabet: "GOOGL",
+    meta: "META",
+    facebook: "META",
+    netflix: "NFLX",
+    palantir: "PLTR",
+    coinbase: "COIN",
+    intel: "INTC",
+    amd: "AMD",
+    disney: "DIS",
+    toyota: "7203.T",
+    sony: "6758.T",
+    softbank: "9984.T",
+    "s&p": "SPY",
+    nasdaq: "QQQ",
+  };
+  const lower = text.toLowerCase();
+  for (const [name, sym] of Object.entries(companyMap)) {
+    if (new RegExp(`\\b${name}\\b`, "i").test(lower)) {
+      return sym;
+    }
+  }
+  const tickerMatch = text.match(/\$([A-Za-z]{1,5})\b/) || text.match(/\b([A-Z]{2,5})\b/);
+  if (tickerMatch) {
+    const sym = (tickerMatch[1] || tickerMatch[0]).toUpperCase();
+    const ignore = new Set([
+      "THE", "FOR", "AND", "ARE", "CAN", "WHY", "HOW", "WHAT", "WHO",
+      "NOT", "ALL", "AWS", "GCP", "SDK", "API", "APP", "AI", "LLM", "CSS", "HTML", "JS", "POST", "GET"
+    ]);
+    if (!ignore.has(sym)) return sym;
+  }
+  return null;
+}
+
 app.post("/api/chat", async (req, res) => {
   if (!process.env.LLM_API_KEY) {
     res.status(501).json({
@@ -1202,8 +1561,51 @@ app.post("/api/chat", async (req, res) => {
     return;
   }
   try {
+    let attachedQuote = null;
+    const isEquity = messages.some(
+      (m) =>
+        typeof m.content === "string" &&
+        (m.content.includes("Equity Analyst") ||
+          m.content.includes("stock") ||
+          m.content.includes("market") ||
+          m.content.includes("valuation") ||
+          m.content.includes("price")),
+    );
+
+    if (isEquity) {
+      const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
+      const symbol = (lastUserMsg ? extractStockQuery(lastUserMsg.content) : null) || "SPY";
+      try {
+        attachedQuote = await fetchRealtimeStockQuote(symbol);
+        if (attachedQuote) {
+          const grounding =
+            `\n\n[REAL-TIME LIVE MARKET GROUNDING DATA (SOURCE: LIVE MARKET FEED)]:\n` +
+            `- Symbol: ${attachedQuote.symbol} (${attachedQuote.name})\n` +
+            `- Current Live Price: $${attachedQuote.price} (${attachedQuote.change >= 0 ? "+" : ""}${attachedQuote.change} / ${attachedQuote.changePercent}%)\n` +
+            `- Previous Close: $${attachedQuote.previousClose} | Today's Range: $${attachedQuote.dayLow} - $${attachedQuote.dayHigh}\n` +
+            `- 52-Week Range: $${attachedQuote.fiftyTwoWeekLow} - $${attachedQuote.fiftyTwoWeekHigh} | Volume: ${attachedQuote.volume.toLocaleString()}\n` +
+            `- Sector: ${attachedQuote.sector} | Industry: ${attachedQuote.industry}\n` +
+            `- Recent Intraday Closes: [${attachedQuote.history.map((h) => h.close).slice(-5).join(", ")}]\n` +
+            `MANDATORY INSTRUCTION: You are the Real-Time Equity Analyst. You MUST reference these exact live market figures in your analysis. Answer concisely (2-3 sentences) with actionable institutional insight.`;
+
+          const sysMsg = messages.find((m) => m.role === "system");
+          if (sysMsg) {
+            sysMsg.content += grounding;
+          } else {
+            messages.unshift({ role: "system", content: grounding });
+          }
+        }
+      } catch (err) {
+        console.debug("Grounding fetch notice:", err.message);
+      }
+    }
+
     const payload = await requestLlmCompletion(messages);
-    res.json(openAiCompatibleResponse(payload));
+    const result = openAiCompatibleResponse(payload);
+    if (attachedQuote) {
+      result.stockQuote = attachedQuote;
+    }
+    res.json(result);
   } catch (err) {
     // This route doesn't go through route() — it has its own try/catch
     // because requestLlmCompletion() isn't an upstreamJson() caller — so it

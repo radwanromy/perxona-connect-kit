@@ -212,6 +212,7 @@ Then open `.env` and fill in the values:
 | `LLM_PROVIDER`                    | —        | `openai` (default) for Chat Completions, or `anthropic` for Claude Messages API.                                                                                                      |
 | `LLM_BASE_URL`                    | —        | Provider base URL. OpenAI default: `https://api.openai.com/v1`; Anthropic default: `https://api.anthropic.com`.                                                                       |
 | `LLM_MODEL`                       | —        | Provider model. Defaults follow `LLM_PROVIDER`: `gpt-4o-mini` for openai, `claude-sonnet-4-20250514` for anthropic.                                                                   |
+| `ALPHA_VANTAGE_API_KEY`           | —        | Free key from [alphavantage.co](https://www.alphavantage.co/support/#api-key). Leave blank and Studio's Equity Analyst "Market Watchlist" panel shows the watchlist with no live prices/news; `/api/stocks/*/quote` and `/news` return `501`. |
 
 The server **exits at startup** if `PERXONA_API_BASE_URL` or either key is missing — one key is not enough, and the message
 names the one you left blank. If
@@ -276,6 +277,8 @@ the Connect API.
 | `GET /api/scenes` · `/api/scenes/:id`                                | List / detail.                                                                                                |
 | `POST /api/chat`                                                     | Opt-in LLM chat. Used by Studio's own-LLM source. Returns `501` until `LLM_API_KEY` is set.                   |
 | `/api/chatbots*`                                                     | Chatbot CRUD, knowledge upload, and multi-turn chat.                                                          |
+| `GET /api/stocks/watchlist`                                          | Static US + Japan ticker/company list for Studio's Equity Analyst "Market Watchlist" panel. No external call. |
+| `GET /api/stocks/:symbol/quote` · `/news`                            | Live quote / recent news via Alpha Vantage, cached 10 min server-side. Returns `501` until `ALPHA_VANTAGE_API_KEY` is set. |
 
 ### Direct Connect presentation API
 

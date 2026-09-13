@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LifeStack — Meet Your AI Avatar</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- Ambient background — three drifting gradient blobs, pure CSS. -->
+    <div class="bg-mesh" aria-hidden="true">
+      <span class="blob blob-1"></span>
+      <span class="blob blob-2"></span>
+      <span class="blob blob-3"></span>
+      <span class="bg-grid"></span>
+    </div>
+
+    <!-- Parallax orbs — nudged by mousemove in app.js for a layered-depth feel. -->
+    <div class="orbs" id="orbs" aria-hidden="true">
+      <span class="orb orb-a"></span>
+      <span class="orb orb-b"></span>
+      <span class="orb orb-c"></span>
+    </div>
+
+    <!-- ── Nav ─────────────────────────────────────────────────────────── -->
+    <header class="site-header">
+      <div class="container header-inner">
+        <a href="#top" class="brand">
+          <span class="brand-mark">◆</span>
+          <span>LifeStack</span>
+        </a>
+        <nav class="nav-links">
+          <a href="#services">Personas</a>
+          <a href="#top">Meet the Avatar</a>
+        </nav>
+      </div>
+    </header>
+
+    <!-- ── Hero ────────────────────────────────────────────────────────── -->
+    <section id="top" class="hero">
+      <div class="container hero-inner">
+        <div class="hero-copy">
+          <p class="eyebrow">LifeStack AI Avatar · Built on Perxona Connect Kit</p>
+          <h1>
+            Give your product a face that
+            <span class="text-glow">talks back</span>.
+          </h1>
+          <p class="hero-sub">
+            A live, speaking 3D avatar — powered by the Perxona Connect API —
+            greets every visitor by name and role. Say hello below.
+          </p>
+          <div class="hero-actions">
+            <a href="#services" class="btn btn-ghost">See the personas</a>
+          </div>
+        </div>
+
+        <div class="hero-stage">
+          <div class="stage-frame">
+            <!-- Perspective floor grid under the avatar — pure CSS, no 3D engine needed for this part. -->
+            <div class="stage-floor" aria-hidden="true"></div>
+
+            <sv-presenter
+              id="presenter"
+              hidden
+              style="width: 100%; height: 100%"
+            ></sv-presenter>
+
+            <!-- Shown until the avatar engine is ready and the visitor clicks in —
+                 see app.js. A real click here is also what unlocks audio, so the
+                 very first thing the avatar says is actually heard, not silent. -->
+            <div id="stage-placeholder" class="stage-placeholder">
+              <div class="pulse-ring" aria-hidden="true"></div>
+              <button
+                type="button"
+                id="enter-btn"
+                class="enter-btn"
+                disabled
+              >
+                <span class="enter-btn-label">Loading avatar…</span>
+              </button>
+            </div>
+
+            <p id="stage-error" class="stage-error" hidden></p>
+          </div>
+          <p class="stage-caption">
+            Click to wake the avatar — it'll introduce itself out loud.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Services ────────────────────────────────────────────────────── -->
+    <section id="services" class="services">
+      <div class="container">
+        <div class="section-heading">
+          <p class="eyebrow">One avatar, three experts</p>
+          <h2>Ask it anything — it knows which hat to wear</h2>
+          <p class="section-sub">
+            The same live avatar switches personas mid-conversation, no reload.
+          </p>
+        </div>
+
+        <div class="services-grid" id="services-grid">
+          <!-- Service 1 -->
+          <article class="service-card" data-tilt>
+            <div class="service-icon" aria-hidden="true">☁️</div>
+            <h3>Senior Cloud Architect</h3>
+            <p class="service-tagline">
+              Talk through your architecture out loud — trade-offs, not
+              tutorials.
+            </p>
+            <ul class="service-features">
+              <li>System design &amp; scalability reviews</li>
+              <li>AWS / Azure / GCP trade-off analysis</li>
+              <li>Security, cost, and CI/CD guidance</li>
+            </ul>
+          </article>
+
+          <!-- Service 2 -->
+          <article class="service-card" data-tilt>
+            <div class="service-icon" aria-hidden="true">🚗</div>
+            <h3>Interactive Driving Instructor</h3>
+            <p class="service-tagline">
+              A hands-free co-pilot that knows the rules of the road, by
+              region.
+            </p>
+            <ul class="service-features">
+              <li>Vehicle-specific technique &amp; handling</li>
+              <li>Traffic rules and licensing by country</li>
+              <li>Verbal scenario quizzing</li>
+            </ul>
+          </article>
+
+          <!-- Service 3 -->
+          <article class="service-card" data-tilt>
+            <div class="service-icon" aria-hidden="true">📈</div>
+            <h3>Real-Time Equity Analyst</h3>
+            <p class="service-tagline">
+              Fast, conversational market reasoning — facts kept separate
+              from speculation.
+            </p>
+            <ul class="service-features">
+              <li>Stock &amp; sector analysis, spoken plainly</li>
+              <li>Earnings and financials, explained</li>
+              <li>Always flags what needs a licensed advisor</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Footer ──────────────────────────────────────────────────────── -->
+    <footer class="site-footer">
+      <div class="container">
+        <p>Built with Perxona Connect Kit.</p>
+      </div>
+    </footer>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

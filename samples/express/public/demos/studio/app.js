@@ -18,6 +18,10 @@
  * Zero dependencies — plain ESM, no build step required.
  */
 
+import { findMentionedSigns, ROAD_SIGNS } from "./road-signs.js";
+import { renderSignSVG } from "./road-sign-svg.js";
+import { EXAM_QUESTIONS } from "./exam-questions.js";
+
 // ── Presenter engine bootstrap ───────────────────────────────────────────────
 
 /**
@@ -151,12 +155,41 @@ const chatStopBtn = document.getElementById("chat-stop-btn");
 const micBtn = document.getElementById("mic-btn");
 const micStatus = document.getElementById("mic-status");
 const personaChips = document.getElementById("persona-chips");
+const examStartBtn = document.getElementById("exam-start-btn");
 const liveModeBtn = document.getElementById("live-mode-btn");
 const audioListeningPanel = document.getElementById("audio-listening-panel");
 const listeningStatusText = document.getElementById("listening-status-text");
 const listeningInterimText = document.getElementById("listening-interim-text");
 const stageListeningHud = document.getElementById("stage-listening-hud");
 const stageHudText = document.getElementById("stage-hud-text");
+
+// Road sign panel (Driving Instruction persona)
+const stageEl = document.querySelector(".stage");
+const signPanel = document.getElementById("sign-panel");
+const signPanelBody = document.getElementById("sign-panel-body");
+const signDetailCompactBtn = document.getElementById("sign-detail-compact-btn");
+const signDetailDetailedBtn = document.getElementById(
+  "sign-detail-detailed-btn",
+);
+const signPanelClose = document.getElementById("sign-panel-close");
+
+// Driving exam panel (Driving Instruction persona)
+const examPanel = document.getElementById("exam-panel");
+const examPanelClose = document.getElementById("exam-panel-close");
+const examPanelBody = document.getElementById("exam-panel-body");
+const examProgressFill = document.getElementById("exam-progress-fill");
+const examProgressText = document.getElementById("exam-progress-text");
+const examScoreText = document.getElementById("exam-score-text");
+const examReviewBtn = document.getElementById("exam-review-btn");
+
+// Market watchlist panel + theater mode (Equity Analyst persona)
+const equityControls = document.getElementById("equity-controls");
+const marketOpenBtn = document.getElementById("market-open-btn");
+const theaterModeBtn = document.getElementById("theater-mode-btn");
+const marketPanel = document.getElementById("market-panel");
+const marketPanelClose = document.getElementById("market-panel-close");
+const marketPanelTitle = document.getElementById("market-panel-title");
+const marketPanelBody = document.getElementById("market-panel-body");
 
 // Source switch
 const sourceRadios = document.querySelectorAll('input[name="source"]');
@@ -255,27 +288,46 @@ setSidebarCollapsed(localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true");
 let isSpeaking = false;
 let isAwaitingReply = false;
 
+// Spoken once on the very first Ready, before any persona is picked — the
+// "Idle/Introducing" state from lifestack_avatar_system_prompt.md Section 1.
 const GREETING =
-  "Hello! [MOTION 01KRW97VSEA5G49W2YXWGV8JRV:1] I can assist as your Senior Cloud Architect, Interactive Driving Instructor, or Real-Time Equity Analyst. What would you like to explore?";
+  "Hi, I'm your LifeStack AI Avatar. [MOTION 01KRW97VSEA5G49W2YXWGV8JRV:1] I can chat generally, or become your Cloud Architect, Driving Instructor, or Equity Analyst — just pick a persona whenever you're ready.";
 
+// Spoken directly (bypassing the chatbot round-trip entirely — see
+// setActivePersona) the instant a persona button is clicked, verbatim from
+// the system prompt spec's Section 2 "Switch-in greeting" lines. A direct
+// presenter.present() call is faster and more reliable than asking the LLM
+// to reproduce an exact scripted line, and matches the spec's own framing:
+// this is a hard, scripted cut, not a generated response.
+const PERSONA_GREETINGS = {
+  cloud:
+    "Alright, switching gears — I'm your Senior Cloud Architect now. Whether it's system design, scaling, cost, or picking the right service, go ahead and ask.",
+  driving:
+    "Okay, I'm your Driving Instructor now — think of me as sitting right next to you. Ask me anything about parking, road signs, or handling the car, and we'll work through it together.",
+  equity:
+    "Switching in — I'm your Real-Time Equity Analyst. Markets, earnings, valuation, sector trends — what do you want to dig into?",
+};
+
+// Content-only portion of lifestack_avatar_system_prompt.md — persona
+// identity/tone/scope, the Driving Instructor's sign-callout walkthrough
+// behavior (Section 2B), and the "voice-first phrasing" rule (short
+// sentences, no markdown/bullets). Kept under the Connect API's 2000-char
+// custom_instructions limit (see the PATCH /api/chatbots/:id note in
+// AGENTS.md's error history) — condensed prose, not the spec's own
+// heading-per-field layout, but no content dropped. The spec's turn-taking/
+// interruption rules (Section 1, items 2–7) aren't included here on purpose:
+// those describe *when the app stops/starts audio*, which only client-side
+// JS can actually do (an LLM has no control over playback) — see
+// setActivePersona (hard-cut + scripted greeting), submitChatMessage
+// (barge-in), startSignWalkthrough (per-sign pointing/highlight pacing),
+// and the Live Mode silence timer near the SpeechRecognition setup below
+// for where those live instead.
 const TRI_PERSONA_INSTRUCTIONS =
-  "You operate as a single assistant that switches between three expert personas depending on the user's question:\n\n" +
-  "1. Senior Cloud Architect (questions on cloud infrastructure, system design, AWS/Azure/GCP, scalability, high availability, security, cost, Kubernetes, CI/CD, IaC):\n" +
-  "- Focus on trade-offs (cost, latency, complexity, vendor lock-in), not tutorials. Assume user knows basics.\n" +
-  "- Ground advice in specific concrete services (e.g. ALB with target-tracking auto scaling, Aurora PostgreSQL, SQS FIFO).\n" +
-  "- Ask cloud provider/scale if it changes the answer materially.\n\n" +
-  "2. Interactive Driving Instructor (questions on driving technique, traffic rules, licensing, vehicle handling):\n" +
-  "- Always establish vehicle type (manual/automatic car, motorcycle, truck) and country/region before specific advice.\n" +
-  "- Ask a short follow-up when vehicle or country is missing.\n" +
-  "- Remind user that official handbooks and local laws take precedence.\n\n" +
-  "3. Real-Time Equity Analyst (questions on stocks, indices, market conditions, earnings, financials):\n" +
-  "- Fast, conversational, data-oriented reasoning through tickers/sectors.\n" +
-  "- Do not state live prices as fact without a connected tool. Offer qualitative reasoning instead.\n" +
-  "- Clearly separate facts from speculation, and always include a brief reminder that this is not personalized financial advice.\n\n" +
-  "General Rules:\n" +
-  "- Stay in character for whichever role is active for that turn. Switch roles as topic changes.\n" +
-  "- If question fits none, answer as a helpful generalist assistant.\n" +
-  "- CRITICAL AVATAR RULE: You are speaking out loud through a 3D avatar. Keep responses concise (maximum 2 to 3 sentences). NEVER use markdown formatting, asterisks, bullet points, or code blocks.";
+  "Real-time, voice-driven AI avatar with three switchable personas — one active per turn, tagged in the user's message as [Persona: X].\n\n" +
+  "Cloud Architect — Identity: deep AWS/Azure/GCP experience: architecture, cost optimization, security, migrations, Kubernetes, serverless, scaling. Tone: confident, precise, pragmatic, like a principal engineer mentoring a colleague — no fluff, straight to trade-offs. Scope: cloud infra, system design, DevOps, reliability, cost, security. Outside this, say so and suggest switching persona.\n\n" +
+  "Driving Instructor — Identity: patient, encouraging, teaches road rules, parking, vehicle handling, hazard awareness. Tone: warm, calm, reassuring, like a passenger-seat coach — clear step-by-step, never condescending. Scope: traffic lights, road signs, traffic rules, parking, vehicle handling, test prep, road safety — grounded in the traffic-light/road-sign rule book in your knowledge base. A Road Signs panel with real sign images appears automatically when you mention specific signs — you DO show pictures, never say you can't; name and describe the sign, the panel displays it. Sign callout: when open, go through signs one at a time in panel order — Japanese, Romaji, English meaning, then a when/what-to-do note — pausing naturally between signs. If interrupted about one sign, answer it, resume only if asked. If asked for a driving exam/quiz, confirm briefly; the app opens the exam panel.\n\n" +
+  "Equity Analyst — Identity: markets, fundamentals, valuation, sector trends, financial statements/news. Tone: sharp, fast-paced, data-driven, like a trading-desk analyst — analysis/education, not advice. Scope: market analysis, company research, valuation, macro trends. Never give personalized advice or say what to buy/sell — explain factors, let them decide.\n\n" +
+  "Voice-first: speaking through a 3D avatar. Max 2-3 short sentences per reply. Never use markdown, asterisks, bullets, or code blocks. No long preambles — get to the point immediately.";
 
 // Prefilled so a new organization can reach a working avatar by pressing Save.
 // Every reply is read aloud by present(), so the instructions ask for short
@@ -313,6 +365,115 @@ const PERSONA_CONFIGS = {
   },
 };
 
+// ── Presenter auto-selection by persona ────────────────────────────────────
+//
+// Each persona has its own matching avatar/scene/voice, per the presenter
+// auto-selection spec. Assets are matched by their catalog `name` (the slug
+// in each asset's CDN path, e.g. "cc084a01_male_xr_01") rather than a
+// hardcoded id — ids are per-organization ULIDs that would silently stop
+// matching if this ran against a different account's catalog, while the
+// name slug is what the spec's asset URLs actually identify.
+const PRESENTER_PRESETS = {
+  driving: {
+    avatarName: "cc084a01_male_xr_01",
+    sceneName: "sova_Outdoor_8",
+    voiceName: "Male - confident and balanced",
+  },
+  cloud: {
+    avatarName: "cc026_male_virtual",
+    sceneName: "sova_Interior_44_Light_HighTechLab_HARU",
+    voiceName: "Male - warm and expressive",
+  },
+  equity: {
+    avatarName: "cc008_female_social",
+    sceneName: "sova_Abstract_11_Dark_DigitalSpace_Leo",
+    voiceName: "Female - formal and fast",
+  },
+};
+
+/** Avatar/scene/voice ids the presenter actually launched with, set once
+ * PRESENTER_STATUS fires "Ready" — compared against the current picker
+ * selection to decide whether a persona switch needs a real relaunch or
+ * just a picker update (see applyPresenterPreset() below). */
+let launchedAvatarId = null;
+let launchedSceneId = null;
+let launchedVoiceId = null;
+
+/** Text queued to replace the generic on-Ready GREETING the next time the
+ * presenter reaches Ready — set when a persona switch triggers a preset
+ * relaunch, so the avatar delivers that persona's own greeting once the new
+ * avatar/scene actually finish loading instead of the default intro. */
+let pendingPersonaGreeting = null;
+
+function findAssetByName(items, name) {
+  return items.find((item) => item.name === name);
+}
+
+/**
+ * Rule 2: auto-apply a persona's preset avatar/scene/voice without prompting
+ * the user to pick them. Rule 3 (a later manual override sticks) falls out
+ * naturally from this only running at persona switch-in, never per-message —
+ * a manual picker change afterward is never overwritten until the next
+ * switch. Rule 4 (no match) is a no-op here: with only these three fixed
+ * personas, "no category matches" only happens if the catalog hasn't loaded
+ * yet or genuinely lacks one of the three assets, in which case this leaves
+ * the current picker selection alone rather than blocking the persona
+ * switch itself.
+ * @param {string} personaKey
+ * @returns {{applied: boolean, needsRelaunch: boolean}}
+ */
+function applyPresenterPreset(personaKey) {
+  const preset = PRESENTER_PRESETS[personaKey];
+  if (!preset) return { applied: false, needsRelaunch: false };
+
+  const avatar = findAssetByName(avatars, preset.avatarName);
+  const scene = findAssetByName(scenes, preset.sceneName);
+  const voice = preset.voiceName
+    ? findAssetByName(voices, preset.voiceName)
+    : null;
+  if (!avatar || !scene) {
+    appendDebug(
+      "err",
+      `Preset for "${personaKey}" not applied — catalog is missing "${preset.avatarName}" or "${preset.sceneName}" (not loaded yet, or not in this account's catalog).`,
+    );
+    return { applied: false, needsRelaunch: false };
+  }
+
+  if (avatarSelect.value !== avatar.id) {
+    avatarSelect.value = avatar.id;
+    avatarSelect.dispatchEvent(new Event("change"));
+  }
+  if (sceneSelect.value !== scene.id) {
+    sceneSelect.value = scene.id;
+    sceneSelect.dispatchEvent(new Event("change"));
+  }
+  if (voice && voiceSelect.value !== voice.id) {
+    voiceSelect.value = voice.id;
+    voiceSelect.dispatchEvent(new Event("change"));
+  }
+
+  // Only a *live* presenter whose current avatar/scene/voice differ from the
+  // newly-selected preset needs a real reload — before the first Launch, or
+  // when the preset already matches what's live, updating the pickers above
+  // is enough.
+  const needsRelaunch =
+    presenterReady &&
+    (launchedAvatarId !== avatarSelect.value ||
+      launchedSceneId !== sceneSelect.value ||
+      (voice ? launchedVoiceId !== voiceSelect.value : false));
+
+  return { applied: true, needsRelaunch };
+}
+
+/**
+ * Persona switch — "instant persona switch" from lifestack_avatar_system_
+ * prompt.md Section 1, item 2: a hard cut, not a gradual transition. If the
+ * avatar is mid-sentence when a persona button is clicked, that sentence is
+ * abandoned outright (interruptSpeaking(), not "let it finish") and the very
+ * next thing spoken is that persona's exact scripted greeting line — spoken
+ * directly via speak(), not generated by the chatbot, so there's no API
+ * round-trip between the click and hearing it.
+ */
 function setActivePersona(personaKey) {
   if (activePersona === personaKey) {
     activePersona = null;
@@ -323,6 +484,59 @@ function setActivePersona(personaKey) {
     if (cfg) {
       chatInput.placeholder = cfg.placeholder;
     }
+    // Hard cut: whatever the avatar was saying (old persona or otherwise)
+    // stops outright, mid-word if need be — never "let it finish this point".
+    if (isSpeaking) interruptSpeaking();
+    const greeting = PERSONA_GREETINGS[personaKey];
+
+    // Presenter auto-selection: switch to this persona's matched avatar,
+    // scene, and voice (see PRESENTER_PRESETS/applyPresenterPreset above).
+    const { needsRelaunch } = applyPresenterPreset(personaKey);
+
+    if (needsRelaunch && !isLaunching) {
+      // The SDK has no way to swap avatar/scene on a live presenter — only
+      // initializeWithConnectKey() can, and that's a real reload (several
+      // seconds), so the greeting waits for the new Ready event instead of
+      // playing over/before the old avatar disappears. Text chat stays
+      // available the whole time (see canSend() — it isn't presenter-gated).
+      pendingPersonaGreeting = greeting ?? null;
+      appendDebug(
+        "cmd",
+        `Persona switch → ${personaKey}: relaunching presenter with matched avatar/scene/voice`,
+      );
+      setStatus(`Switching to ${cfg?.label ?? personaKey}'s presenter…`);
+      launchPresenter();
+    } else if (greeting) {
+      appendDebug("cmd", `Persona switch → ${personaKey}: scripted greeting`);
+      speak(greeting).then((queued) => {
+        if (!queued) setSpeaking(false);
+      });
+    }
+  }
+
+  // The sign panel and exam are Driving Instruction-specific — leaving that
+  // persona closes them (and returns the camera to center) rather than
+  // leaving a stale set of signs or an in-progress exam docked on the stage.
+  examStartBtn.hidden = activePersona !== "driving";
+  if (activePersona !== "driving") {
+    signPanel.hidden = true;
+    signPanel.classList.remove("sign-panel-hero", "sign-panel-pair");
+    stageEl.classList.remove("signs-open");
+    clearSignWalkthrough();
+    closeExamPanel();
+  }
+
+  // Market watchlist + theater mode are Equity Analyst-specific. Prefetch
+  // the (static, no external call) watchlist as soon as this persona goes
+  // active so a ticker mentioned in chat can be matched even before the
+  // user has opened the panel by hand — see findWatchlistMatches().
+  equityControls.hidden = activePersona !== "equity";
+  if (activePersona === "equity") {
+    ensureMarketWatchlistLoaded().catch((err) =>
+      appendDebug("err", `Failed to load market watchlist: ${err.message}`),
+    );
+  } else {
+    closeMarketPanel();
   }
 
   if (personaChips) {
@@ -394,9 +608,10 @@ let activeBotId = null;
 let chatbotList = [];
 /** Whether the presenter has reached Ready status. */
 let presenterReady = false;
-/** Catalog caches for thumbnail lookups. */
+/** Catalog caches for thumbnail lookups (and, for voices, preset matching). */
 let avatars = [];
 let scenes = [];
+let voices = [];
 
 // Knowledge-file status polling. Upload/embedding is asynchronous on the
 // backend (chunking + embedding via a queued job, can take from seconds to
@@ -1054,6 +1269,7 @@ async function loadCatalog() {
       ]);
     avatars = avatarList;
     scenes = sceneList;
+    voices = voiceList;
     // Initial picks: 6th avatar, 2nd scene, 1st voice (indices 5/1/0) —
     // falls back toward index 0 in fillSelect if a catalog is shorter.
     fillSelect(avatarSelect, avatarList, "— select avatar —", 5);
@@ -1097,16 +1313,28 @@ presenter.addEventListener("PRESENTER_STATUS", (e) => {
   if (status === "Ready") {
     presenterReady = true;
     isLaunching = false;
+    // What actually got launched — compared against future picker/preset
+    // selections to decide whether a persona switch needs a real relaunch
+    // (see applyPresenterPreset()).
+    launchedAvatarId = avatarSelect.value;
+    launchedSceneId = sceneSelect.value;
+    launchedVoiceId = voiceSelect.value;
     stagePlaceholder.hidden = true;
     presenter.hidden = false;
     updateDebugPanelVisibility(); // reveals the timeline, unless toggled off
     presenter.muteAudio?.(!stageToggleVoice.checked); // apply any pre-launch mute
     renderPersistentStageOverlay(); // apply any pre-launch Avatar/Scene toggle
     updateChatUI();
-    // Same rule the submit handler applies: a line that never queued has no
-    // ALL_PERFORMANCE_FINISHED coming, so nothing else will release the controls.
-    // Without this a failed greeting leaves the reader pressing Stop to type.
-    speak(GREETING).then((queued) => {
+    // A persona-triggered relaunch (see setActivePersona/applyPresenterPreset)
+    // queues that persona's own greeting here instead of the generic one —
+    // this is the first moment the new avatar/scene/voice actually exist to
+    // say it. Same rule the submit handler applies: a line that never queued
+    // has no ALL_PERFORMANCE_FINISHED coming, so nothing else will release
+    // the controls — without this a failed greeting leaves the reader
+    // pressing Stop to type.
+    const greetingToSpeak = pendingPersonaGreeting ?? GREETING;
+    pendingPersonaGreeting = null;
+    speak(greetingToSpeak).then((queued) => {
       if (!queued) setSpeaking(false);
     });
   }
@@ -1144,6 +1372,7 @@ presenter.addEventListener("PERFORMANCE_END", () => {
 presenter.addEventListener("ALL_PERFORMANCE_FINISHED", () => {
   appendDebug("ok", "All performances finished — avatar returned to idle ✓");
   setSpeaking(false);
+  clearSignWalkthrough();
 });
 
 presenter.addEventListener("PLAYING_SPEECH_TEXT", (e) => {
@@ -1623,11 +1852,34 @@ function updateChatUI() {
  * Append a message bubble to the chat log.
  * @param {"user"|"assistant"|"error"} role
  * @param {string} text
+ * @param {object} [stockQuote]
  */
-function appendChat(role, text) {
+function appendChat(role, text, stockQuote = null) {
   const el = document.createElement("div");
-  el.className = `chat-msg ${role}`;
-  el.textContent = text;
+  el.className = `chat-msg ${role}${stockQuote ? " has-card" : ""}`;
+
+  if (stockQuote && role === "assistant") {
+    const textSpan = document.createElement("div");
+    textSpan.className = "chat-msg-text";
+    textSpan.textContent = text;
+    el.appendChild(textSpan);
+
+    const cardEl = document.createElement("div");
+    cardEl.className = "chat-equity-card";
+    cardEl.innerHTML = renderChatEquityCardHtml(stockQuote);
+
+    const viewBtn = cardEl.querySelector(".chat-equity-view-btn");
+    if (viewBtn) {
+      viewBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openStockDetail(stockQuote.symbol);
+      });
+    }
+    el.appendChild(cardEl);
+  } else {
+    el.textContent = text;
+  }
+
   chatLog.append(el);
   chatLog.scrollTop = chatLog.scrollHeight;
 }
@@ -1644,6 +1896,9 @@ function interruptSpeaking() {
   // not coming for the performance we just cut short — leave the speaking state
   // here rather than waiting for an event that will never arrive.
   setSpeaking(false);
+  // Whatever was narrated stops here too — a stale highlight pointing at
+  // "the sign being described" would be wrong the instant speech cuts off.
+  clearSignWalkthrough();
 }
 
 chatStopBtn.addEventListener("click", () => {
@@ -1702,6 +1957,1137 @@ personaChips?.addEventListener("click", (e) => {
   }
 });
 
+// ── Road sign panel (Driving Instruction persona) ─────────────────────────
+//
+// A real "screen" docked to the stage (see .sign-panel in style.css), not a
+// chat-log thumbnail. Detection is a plain keyword match against
+// road-signs.js's ROAD_SIGNS — no NLP available client-side, and every sign
+// has enough named/romaji/Japanese keywords that this catches the normal
+// ways someone would ask. Shape/color rendering is real SVG per sign (see
+// road-sign-svg.js), not a text description.
+
+// "auto" (the default until the user explicitly picks a side) adapts the
+// layout to how many signs are currently shown — 1 gets a large hero card,
+// 2 get large paired cards, 3+ fall back to the compact grid. Picking
+// Compact or Detailed via the footer switch pins that choice regardless of
+// count from then on; there's no UI path back to "auto" once set, same as
+// the old binary toggle never had a way to "unset" itself.
+const SIGN_DETAIL_STORAGE_KEY = "studio.signPanelDetail";
+let signPanelDetail = localStorage.getItem(SIGN_DETAIL_STORAGE_KEY) || "auto";
+let currentSignCount = 0;
+
+/** @param {number} count */
+function computeEffectiveSignDetail(count) {
+  if (signPanelDetail === "compact" || signPanelDetail === "detailed") {
+    return signPanelDetail;
+  }
+  return count >= 3 ? "compact" : "detailed"; // auto
+}
+
+/** Applies the effective compact/detailed/hero/pair layout for the given
+ * sign count and syncs the footer switch to reflect it.
+ * @param {number} count */
+function applySignPanelLayout(count) {
+  currentSignCount = count;
+  const effective = computeEffectiveSignDetail(count);
+  signPanel.dataset.detail = effective;
+  signPanel.classList.toggle(
+    "sign-panel-hero",
+    effective === "detailed" && count === 1,
+  );
+  signPanel.classList.toggle(
+    "sign-panel-pair",
+    effective === "detailed" && count === 2,
+  );
+  signDetailCompactBtn.classList.toggle("active", effective === "compact");
+  signDetailCompactBtn.setAttribute(
+    "aria-pressed",
+    String(effective === "compact"),
+  );
+  signDetailDetailedBtn.classList.toggle("active", effective === "detailed");
+  signDetailDetailedBtn.setAttribute(
+    "aria-pressed",
+    String(effective === "detailed"),
+  );
+}
+
+/** @param {import('./road-signs.js').RoadSign[]} signs */
+function renderSignPanel(signs) {
+  signPanelBody.replaceChildren(
+    ...signs.map((sign) => {
+      const card = document.createElement("div");
+      card.className = "sign-card";
+      card.dataset.signId = sign.id;
+      card.setAttribute("role", "listitem");
+
+      const svgWrap = document.createElement("div");
+      svgWrap.className = "sign-card-svg";
+      svgWrap.innerHTML = renderSignSVG(sign);
+
+      // Japanese + Romaji + English are always shown, in that order, in
+      // every layout (see the sign-callout spec).
+      const japanese = document.createElement("p");
+      japanese.className = "sign-card-japanese";
+      japanese.textContent = sign.japanese;
+
+      const name = document.createElement("p");
+      name.className = "sign-card-name";
+      name.textContent = sign.romaji;
+
+      const english = document.createElement("p");
+      english.className = "sign-card-english";
+      english.textContent = sign.english;
+
+      card.append(svgWrap, japanese, name, english);
+      return card;
+    }),
+  );
+  applySignPanelLayout(signs.length);
+}
+
+/**
+ * Scans `text` for road-sign mentions and opens/refreshes the panel if any
+ * match, sliding the avatar's camera left to make room (see the
+ * .stage.signs-open rules in style.css).
+ * @returns {import('./road-signs.js').RoadSign[]} the matched signs, in the
+ * same panel order rendered — the walkthrough that narrates them afterward
+ * needs this same order to stay in sync with what's on screen.
+ */
+function checkForRoadSigns(text) {
+  const signs = findMentionedSigns(text);
+  if (signs.length === 0) return [];
+  closeExamPanel(); // only one docked side panel at a time
+  closeMarketPanel();
+  signPanel.hidden = false;
+  stageEl.classList.add("signs-open");
+  renderSignPanel(signs);
+  return signs;
+}
+
+function setSignPanelDetail(value) {
+  signPanelDetail = value;
+  localStorage.setItem(SIGN_DETAIL_STORAGE_KEY, signPanelDetail);
+  applySignPanelLayout(currentSignCount);
+}
+
+signDetailCompactBtn.addEventListener("click", () =>
+  setSignPanelDetail("compact"),
+);
+signDetailDetailedBtn.addEventListener("click", () =>
+  setSignPanelDetail("detailed"),
+);
+
+signPanelClose.addEventListener("click", () => {
+  signPanel.hidden = true;
+  signPanel.classList.remove("sign-panel-hero", "sign-panel-pair");
+  stageEl.classList.remove("signs-open");
+  clearSignWalkthrough();
+});
+
+// ── Sign-callout walkthrough ────────────────────────────────────────────
+//
+// The Driving Instructor's spoken reply already narrates the signs one at a
+// time (see the "Sign callout" line in TRI_PERSONA_INSTRUCTIONS), but that
+// narration is a single presenter.present() call with no word-level timing
+// the SDK exposes back to us (no speech-boundary/timepoint event on
+// @perxona/presenter-types — see the framing-face comment above for the
+// same kind of SDK gap). So this can't truly know which word is being
+// spoken right now; instead it approximates even pacing across the
+// estimated speech duration (word count / ~150wpm) and advances the
+// highlighted sign — plus a pointing motion, if the avatar's catalog
+// happens to have one — at roughly equal intervals. Good enough to keep
+// visual focus in the neighborhood of the narration; not literally
+// synced to speech the way real timepoints would be.
+
+let signWalkthroughTimers = [];
+let pointingMotionForCurrentAvatar; // undefined = not searched yet, null = searched, none found
+
+function clearSignWalkthrough() {
+  signWalkthroughTimers.forEach((t) => clearTimeout(t));
+  signWalkthroughTimers = [];
+  signPanelBody
+    .querySelectorAll(".sign-card-active")
+    .forEach((el) => el.classList.remove("sign-card-active"));
+}
+
+/** Finds a "point"-ish motion in the given catalog, if any. Not spatially
+ * aimable — playMotion() takes no target — so every sign reuses the same
+ * generic gesture as a flourish alongside the real sync mechanism (the
+ * highlight). */
+function findPointingMotion(motions) {
+  return motions.find(
+    (m) =>
+      /point/i.test(m.name ?? "") || (m.tags ?? []).some((t) => /point/i.test(t)),
+  );
+}
+
+async function ensurePointingMotionLoaded() {
+  const avatarId = avatarSelect.value;
+  if (!avatarId) return null;
+  if (motionsLoadedForAvatarId !== avatarId) {
+    try {
+      const { items } = await request(
+        `/api/avatars/${encodeURIComponent(avatarId)}/motions`,
+      );
+      motionsForCurrentAvatar = items ?? [];
+      motionsLoadedForAvatarId = avatarId;
+      pointingMotionForCurrentAvatar = undefined; // catalog changed, re-search
+    } catch {
+      return null; // best-effort — the highlight-only sync still works without it
+    }
+  }
+  if (pointingMotionForCurrentAvatar === undefined) {
+    pointingMotionForCurrentAvatar =
+      findPointingMotion(motionsForCurrentAvatar) ?? null;
+    if (!pointingMotionForCurrentAvatar) {
+      appendDebug(
+        "cmd",
+        "Sign walkthrough: no pointing motion in this avatar's catalog — using highlight-only sync",
+      );
+    }
+  }
+  return pointingMotionForCurrentAvatar;
+}
+
+/**
+ * Highlights each sign in turn (see .sign-card-active in style.css) and
+ * fires a pointing motion where available, timed to roughly track the
+ * spoken narration of `replyText`. Call after speak(replyText) has been
+ * queued for the Driving Instructor persona.
+ * @param {import('./road-signs.js').RoadSign[]} signs same order as rendered
+ * @param {string} replyText the text actually handed to speak()
+ */
+async function startSignWalkthrough(signs, replyText) {
+  clearSignWalkthrough();
+  if (signs.length === 0) return;
+
+  const words = replyText.trim().split(/\s+/).filter(Boolean).length;
+  const SPEAKING_WORDS_PER_SEC = 2.5; // ~150wpm, a plain average-speech estimate
+  const MIN_MS_PER_SIGN = 1400;
+  const estTotalMs = Math.max(
+    signs.length * MIN_MS_PER_SIGN,
+    (words / SPEAKING_WORDS_PER_SEC) * 1000,
+  );
+  const perSignMs = estTotalMs / signs.length;
+
+  const pointingMotion = await ensurePointingMotionLoaded();
+
+  signs.forEach((sign, i) => {
+    const timer = window.setTimeout(async () => {
+      signPanelBody
+        .querySelectorAll(".sign-card-active")
+        .forEach((el) => el.classList.remove("sign-card-active"));
+      const card = signPanelBody.querySelector(
+        `[data-sign-id="${sign.id}"]`,
+      );
+      card?.classList.add("sign-card-active");
+      card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      if (pointingMotion && presenterReady) {
+        try {
+          await presenter.playMotion(pointingMotion.motion_id);
+        } catch {
+          // Best-effort flourish — the highlight above is the real sync.
+        }
+      }
+    }, i * perSignMs);
+    signWalkthroughTimers.push(timer);
+  });
+}
+
+// ── Driving exam ─────────────────────────────────────────────────────────
+//
+// A real quiz, not a chatbot round-trip — questions are a fixed local bank
+// (see exam-questions.js) grounded in the traffic-light/road-sign rule book
+// the user supplied, which is also uploaded to this chatbot's own knowledge
+// base so its normal spoken answers stay grounded in the same source. The
+// panel shares #sign-panel's docking/backdrop (see the .sign-panel,
+// .exam-panel CSS rule) but only one of the two is ever open — opening
+// either closes the other.
+
+/**
+ * @typedef {{selected: number[], correct: boolean}} ExamAnswer
+ */
+
+let examQuestions = [];
+let examIndex = 0;
+/** @type {ExamAnswer[]} */
+let examAnswers = [];
+let examSubmitted = false;
+
+function shuffledExamQuestions() {
+  const pool = [...EXAM_QUESTIONS];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool;
+}
+
+const EXAM_INTRO_TEXT =
+  "Let's test your knowledge. Answer each question on the panel — you'll see whether you're right straight after each one, and you can review everything once you've done ten.";
+
+/**
+ * @param {boolean} [logToChat] append the intro line to the chat log/history
+ * too — on when opened from a typed request (so the transcript shows what
+ * happened), off when opened via the Take a Driving Exam button, which
+ * already makes that obvious without a log entry.
+ */
+function openExamPanel(logToChat = false) {
+  // Only one docked side panel at a time — opening the exam takes the same
+  // stage real estate the sign panel/market panel use.
+  signPanel.hidden = true;
+  signPanel.classList.remove("sign-panel-hero", "sign-panel-pair");
+  stageEl.classList.remove("signs-open");
+  clearSignWalkthrough();
+  closeMarketPanel();
+
+  examQuestions = shuffledExamQuestions();
+  examIndex = 0;
+  examAnswers = [];
+  examSubmitted = false;
+
+  examPanel.hidden = false;
+  stageEl.classList.add("exam-open");
+  renderExamQuestion();
+
+  if (logToChat) {
+    appendChat("assistant", EXAM_INTRO_TEXT);
+    chatHistory.push({ role: "assistant", text: EXAM_INTRO_TEXT });
+  }
+
+  if (isSpeaking) interruptSpeaking();
+  speak(EXAM_INTRO_TEXT).then((queued) => {
+    if (!queued) setSpeaking(false);
+  });
+}
+
+function closeExamPanel() {
+  examPanel.hidden = true;
+  stageEl.classList.remove("exam-open");
+}
+
+examStartBtn.addEventListener("click", () => openExamPanel());
+examPanelClose.addEventListener("click", closeExamPanel);
+
+function updateExamChrome() {
+  const total = examQuestions.length;
+  const current = Math.min(examIndex + 1, total);
+  examProgressFill.style.width = `${(examAnswers.length / total) * 100}%`;
+  examProgressText.textContent = `Question ${current} of ${total}`;
+  const correctCount = examAnswers.filter((a) => a.correct).length;
+  examScoreText.textContent = `Score: ${correctCount} / ${examAnswers.length}`;
+  // "the facility to view the answer after the tenth, or after more than
+  // ten" — always usable, but visually calls attention to itself once
+  // there's a real batch of answers to look back over.
+  examReviewBtn.classList.toggle("ready", examAnswers.length >= 10);
+}
+
+/** @param {import('./exam-questions.js').ExamQuestion} q */
+function examQuestionIcon(q) {
+  if (!q.signId) return "";
+  const sign = ROAD_SIGNS.find((s) => s.id === q.signId);
+  if (!sign) return "";
+  return `<div class="exam-question-icon">${renderSignSVG(sign)}</div>`;
+}
+
+function renderExamQuestion() {
+  examSubmitted = false;
+  const q = examQuestions[examIndex];
+  const inputType = q.multiple ? "checkbox" : "radio";
+  const hint = q.multiple ? "Select all that apply." : "Select one answer.";
+
+  examPanelBody.innerHTML = `
+    <div class="exam-question">
+      <p class="exam-question-meta">${q.category.replace("-", " ")}</p>
+      ${examQuestionIcon(q)}
+      <p class="exam-question-text">${escapeHtml(q.question)}</p>
+      <p class="exam-question-hint">${hint}</p>
+      <div class="exam-options" role="group" aria-label="Answer options">
+        ${q.options
+          .map(
+            (opt, i) => `
+          <label class="exam-option">
+            <input type="${inputType}" name="exam-option" value="${i}" />
+            <span class="exam-option-text">${escapeHtml(opt)}</span>
+          </label>`,
+          )
+          .join("")}
+      </div>
+      <div class="exam-actions">
+        <button type="button" id="exam-submit-btn" disabled>Submit Answer</button>
+      </div>
+      <div class="exam-feedback" id="exam-feedback" hidden></div>
+    </div>
+  `;
+
+  const optionInputs = [
+    ...examPanelBody.querySelectorAll('input[name="exam-option"]'),
+  ];
+  const submitBtn = document.getElementById("exam-submit-btn");
+  optionInputs.forEach((input) => {
+    input.addEventListener("change", () => {
+      submitBtn.disabled = !optionInputs.some((i) => i.checked);
+    });
+  });
+  submitBtn.addEventListener("click", () => submitExamAnswer(optionInputs));
+
+  updateExamChrome();
+}
+
+/** @param {HTMLInputElement[]} optionInputs */
+function submitExamAnswer(optionInputs) {
+  if (examSubmitted) return;
+  examSubmitted = true;
+
+  const q = examQuestions[examIndex];
+  const selected = optionInputs
+    .filter((i) => i.checked)
+    .map((i) => Number(i.value))
+    .sort((a, b) => a - b);
+  const correctSorted = [...q.correct].sort((a, b) => a - b);
+  const isCorrect =
+    selected.length === correctSorted.length &&
+    selected.every((v, i) => v === correctSorted[i]);
+
+  examAnswers[examIndex] = { selected, correct: isCorrect };
+
+  optionInputs.forEach((input) => {
+    input.disabled = true;
+    const value = Number(input.value);
+    const label = input.closest(".exam-option");
+    const wasSelected = selected.includes(value);
+    const isRight = q.correct.includes(value);
+    if (isRight) {
+      label.classList.add("correct");
+      if (wasSelected || q.multiple) {
+        label.insertAdjacentHTML(
+          "beforeend",
+          '<span class="exam-option-mark">✓</span>',
+        );
+      }
+    } else if (wasSelected) {
+      label.classList.add("incorrect");
+      label.insertAdjacentHTML(
+        "beforeend",
+        '<span class="exam-option-mark">✗</span>',
+      );
+    }
+  });
+
+  const feedback = document.getElementById("exam-feedback");
+  const isLast = examIndex === examQuestions.length - 1;
+  feedback.hidden = false;
+  feedback.innerHTML = `
+    <p class="exam-feedback-result ${isCorrect ? "correct" : "incorrect"}">
+      ${isCorrect ? "✓ Correct" : "✗ Not quite"}
+    </p>
+    <p class="exam-feedback-explanation">${escapeHtml(q.explanation)}</p>
+    <div class="exam-actions">
+      <button type="button" id="exam-next-btn">${
+        isLast ? "Finish Exam →" : "Next Question →"
+      }</button>
+    </div>
+  `;
+  document
+    .getElementById("exam-next-btn")
+    .addEventListener("click", () => {
+      if (isLast) {
+        renderExamReview();
+      } else {
+        examIndex += 1;
+        renderExamQuestion();
+      }
+    });
+
+  document.getElementById("exam-submit-btn")?.setAttribute("disabled", "");
+  updateExamChrome();
+}
+
+function renderExamReview() {
+  const correctCount = examAnswers.filter((a) => a?.correct).length;
+  const answeredCount = examAnswers.filter(Boolean).length;
+  const finished = answeredCount === examQuestions.length;
+
+  const items = examQuestions
+    .map((q, i) => {
+      const answer = examAnswers[i];
+      if (!answer) return "";
+      const yourAnswer = answer.selected.map((idx) => q.options[idx]).join(", ") || "—";
+      const rightAnswer = q.correct.map((idx) => q.options[idx]).join(", ");
+      return `
+        <div class="exam-review-item ${answer.correct ? "correct" : "incorrect"}">
+          <p class="exam-review-question">${i + 1}. ${escapeHtml(q.question)}</p>
+          <p class="exam-review-answer">
+            Your answer: <strong>${escapeHtml(yourAnswer)}</strong><br />
+            Correct answer: <strong>${escapeHtml(rightAnswer)}</strong>
+          </p>
+        </div>`;
+    })
+    .join("");
+
+  examPanelBody.innerHTML = `
+    <p class="exam-review-summary">
+      ${finished ? "Exam complete — " : "Progress so far — "}
+      Score: ${correctCount} / ${answeredCount}
+    </p>
+    <div class="exam-review-list">${items}</div>
+    <button type="button" id="exam-review-back-btn" class="exam-back-btn">
+      ${finished ? "Restart Exam" : "← Back to Question"}
+    </button>
+  `;
+
+  document.getElementById("exam-review-back-btn").addEventListener("click", () => {
+    if (finished) {
+      openExamPanel();
+    } else {
+      renderExamQuestion();
+    }
+  });
+}
+
+examReviewBtn.addEventListener("click", renderExamReview);
+
+/** Minimal HTML-escaping for question/option/explanation text injected via
+ * innerHTML above — all of it is our own static exam-questions.js content,
+ * not user input, but this keeps that assumption from becoming load-bearing. */
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+const EXAM_INTENT_PATTERN =
+  /\b(start|take|begin|do|give me)\b[^.?!]{0,20}\b(exam|quiz|test)\b|\btest my (driving )?knowledge\b|\bdriving (license |licence )?(exam|test)\b|\bquiz me\b/i;
+
+/** @param {string} text */
+function isExamIntent(text) {
+  return EXAM_INTENT_PATTERN.test(text);
+}
+
+// ── Equity Analyst — market watchlist ────────────────────────────────────
+//
+// Real quotes/news for the two watchlists from equity_analyst_prompt.md, via
+// the server's /api/stocks/* routes (server.mjs), which call Alpha Vantage
+// when ALPHA_VANTAGE_API_KEY is set and return 501 otherwise — see the
+// "not connected" branches below for the honest state when it isn't. Prices
+// are never auto-fetched for the whole list at once: Alpha Vantage's free
+// tier caps out at a handful of requests a day, so every quote/news fetch
+// is a direct result of something the user actually asked for (a row
+// click, "Load prices", or a ticker mentioned in chat), and every response
+// is cached both server-side (10 min, see server.mjs) and again here for
+// the rest of this session.
+
+let marketWatchlist = null; // { us: [...], japan: [...] } — fetched once, static
+const marketQuoteCache = new Map(); // symbol -> quote object | {error}
+const marketNewsCache = new Map(); // symbol -> news items array
+
+async function ensureMarketWatchlistLoaded() {
+  if (!marketWatchlist) marketWatchlist = await request("/api/stocks/watchlist");
+  return marketWatchlist;
+}
+
+function findWatchlistEntry(symbol) {
+  if (!marketWatchlist) return null;
+  const needle = symbol.toUpperCase();
+  return (
+    marketWatchlist.us.find((s) => s.symbol === needle) ??
+    marketWatchlist.japan.find((s) => s.symbol === needle) ??
+    null
+  );
+}
+
+/** Japan tickers carry Alpha Vantage's ".T" suffix (see server.mjs); that's
+ * also this app's only signal for which currency to render a price in. */
+function currencyForSymbol(symbol) {
+  if (!symbol) return "USD";
+  return symbol.endsWith(".T") ? "JPY" : "USD";
+}
+
+function formatPrice(value, currency = "USD") {
+  if (typeof value !== "number" || Number.isNaN(value)) return "—";
+  const cur = String(currency || "USD").toUpperCase();
+  const prefix = cur === "JPY" ? "¥" : (cur === "EUR" ? "€" : (cur === "GBP" ? "£" : "$"));
+  return `${prefix}${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** Alpha Vantage's time_published is "YYYYMMDDTHHMMSS" — reformat rather
+ * than showing that raw string in the news list. */
+function formatNewsTimestamp(raw) {
+  if (!raw || raw.length < 15) return raw || "unknown time";
+  const iso = `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}T${raw.slice(9, 11)}:${raw.slice(11, 13)}:${raw.slice(13, 15)}`;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? raw : d.toLocaleString();
+}
+
+async function fetchQuote(symbol) {
+  if (marketQuoteCache.has(symbol)) return marketQuoteCache.get(symbol);
+  try {
+    const quote = await request(`/api/stocks/${encodeURIComponent(symbol)}/quote`);
+    marketQuoteCache.set(symbol, quote);
+    return quote;
+  } catch (err) {
+    const failed = { error: err.message };
+    marketQuoteCache.set(symbol, failed);
+    return failed;
+  }
+}
+
+async function fetchNews(symbol) {
+  if (marketNewsCache.has(symbol)) return marketNewsCache.get(symbol);
+  try {
+    const { items } = await request(`/api/stocks/${encodeURIComponent(symbol)}/news`);
+    marketNewsCache.set(symbol, items);
+    return items;
+  } catch {
+    return []; // news is a nice-to-have — a failed fetch just shows "no news", not an error banner
+  }
+}
+
+async function openMarketPanel() {
+  // Only one docked side panel at a time — opening the market watchlist
+  // takes the same stage real estate the sign/exam panels use.
+  signPanel.hidden = true;
+  signPanel.classList.remove("sign-panel-hero", "sign-panel-pair");
+  stageEl.classList.remove("signs-open");
+  clearSignWalkthrough();
+  closeExamPanel();
+
+  marketPanel.hidden = false;
+  stageEl.classList.add("market-open");
+  await renderMarketList();
+}
+
+function closeMarketPanel() {
+  marketPanel.hidden = true;
+  stageEl.classList.remove("market-open");
+}
+
+marketOpenBtn.addEventListener("click", () => openMarketPanel());
+marketPanelClose.addEventListener("click", closeMarketPanel);
+
+function marketRowHtml(entry) {
+  const cached = marketQuoteCache.get(entry.symbol);
+  let priceHtml = `<span class="market-row-price-unavailable">tap to load</span>`;
+  if (cached && !cached.error) {
+    const up = cached.change >= 0;
+    priceHtml =
+      `<span class="market-row-price">${formatPrice(cached.price, currencyForSymbol(entry.symbol))}` +
+      `<span class="market-row-change ${up ? "up" : "down"}">${up ? "+" : ""}${cached.changePercent ?? "—"}%</span></span>`;
+  } else if (cached?.error) {
+    priceHtml = `<span class="market-row-price-unavailable">no data</span>`;
+  }
+  return `
+    <button type="button" class="market-row" data-symbol="${entry.symbol}">
+      <span class="market-row-name">
+        <span class="market-row-symbol">${entry.symbol}</span>
+        <span class="market-row-company">${escapeHtml(entry.name)}</span>
+      </span>
+      ${priceHtml}
+    </button>`;
+}
+
+function wireMarketRowClicks() {
+  marketPanelBody.querySelectorAll(".market-row").forEach((row) => {
+    row.addEventListener("click", () => openStockDetail(row.dataset.symbol));
+  });
+}
+
+/** Re-renders just the price cells after a background fetch, without
+ * rebuilding the whole list (which would reset scroll position). */
+function refreshMarketRowPrices() {
+  marketPanelBody.querySelectorAll(".market-row").forEach((row) => {
+    const entry = findWatchlistEntry(row.dataset.symbol);
+    if (entry) row.outerHTML = marketRowHtml(entry);
+  });
+  wireMarketRowClicks();
+}
+
+/** Fetches quotes for the US list one at a time with a short stagger, so a
+ * free-tier per-minute rate limit doesn't reject a burst of requests all at
+ * once — stops early and says why if the key's quota is hit mid-list. */
+async function loadPricesSequentially(button) {
+  button.disabled = true;
+  for (const entry of marketWatchlist.us) {
+    if (marketQuoteCache.has(entry.symbol)) continue;
+    button.textContent = `Loading ${entry.symbol}…`;
+    const quote = await fetchQuote(entry.symbol);
+    refreshMarketRowPrices();
+    if (quote?.error) {
+      button.textContent = `Stopped — ${quote.error}`;
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 350));
+  }
+  button.remove();
+}
+
+async function renderMarketList() {
+  await ensureMarketWatchlistLoaded();
+  marketPanel.dataset.view = "list";
+  marketPanelTitle.textContent = "📈 Market Watchlist";
+
+  const notice = appConfig.market
+    ? ""
+    : `<div class="market-notice">Live prices and news aren't connected yet — set ALPHA_VANTAGE_API_KEY in .env to enable them (see .env.example). The tickers below are still the real watchlist, just without live numbers.</div>`;
+  const loadBtn = appConfig.market
+    ? `<button type="button" id="market-load-prices-btn" class="market-load-prices-btn">Load US prices</button>`
+    : "";
+
+  marketPanelBody.innerHTML = `
+    ${notice}
+    ${loadBtn}
+    <p class="market-group-label">US Watchlist</p>
+    ${marketWatchlist.us.map(marketRowHtml).join("")}
+    <p class="market-group-label">Japan Watchlist</p>
+    ${marketWatchlist.japan.map(marketRowHtml).join("")}
+  `;
+  wireMarketRowClicks();
+  document
+    .getElementById("market-load-prices-btn")
+    ?.addEventListener("click", (e) => loadPricesSequentially(e.currentTarget));
+}
+
+let chartIdSeq = 0;
+
+/**
+ * Generate animated SVG stock chart markup with gradient area, trend polyline,
+ * glowing stroke, and pulsing price dot at the latest price point.
+ */
+function renderStockSvgChart(quote, width = 360, height = 150) {
+  if (!quote) return "";
+  const chartId = `equity-chart-${(quote.symbol || "stock").replace(/[^a-zA-Z0-9]/g, "")}-${++chartIdSeq}`;
+
+  let prices = [];
+  if (Array.isArray(quote.history) && quote.history.length >= 2) {
+    prices = quote.history
+      .map((pt) => (typeof pt === "number" ? pt : pt.price))
+      .filter((p) => typeof p === "number" && !Number.isNaN(p));
+  }
+
+  if (prices.length < 2) {
+    const pClose = Number(quote.previousClose) || Number(quote.price) || 100;
+    const pCurrent = Number(quote.price) || pClose;
+    const dLow = Number(quote.dayLow) || Math.min(pClose, pCurrent) * 0.992;
+    const dHigh = Number(quote.dayHigh) || Math.max(pClose, pCurrent) * 1.008;
+
+    prices = [pClose];
+    const steps = 15;
+    for (let i = 1; i < steps - 1; i++) {
+      const progress = i / (steps - 1);
+      const trend = pClose + (pCurrent - pClose) * progress;
+      const wave = Math.sin(progress * Math.PI * 3) * ((dHigh - dLow) * 0.24);
+      const jitter = Math.cos(progress * 8) * ((dHigh - dLow) * 0.08);
+      const val = Math.max(dLow, Math.min(dHigh, trend + wave + jitter));
+      prices.push(val);
+    }
+    prices.push(pCurrent);
+  }
+
+  const isPositive =
+    Number(quote.change) >= 0 ||
+    (typeof quote.changePercent === "string" && !quote.changePercent.startsWith("-"));
+  const strokeColor = isPositive ? "#10b981" : "#ef4444";
+
+  const padLeft = 14;
+  const padRight = 16;
+  const padTop = 16;
+  const padBottom = 22;
+
+  let minPrice = Math.min(...prices);
+  let maxPrice = Math.max(...prices);
+  if (minPrice === maxPrice) {
+    minPrice *= 0.99;
+    maxPrice *= 1.01;
+  }
+  const rawRange = maxPrice - minPrice;
+  minPrice -= rawRange * 0.06;
+  maxPrice += rawRange * 0.06;
+  const priceRange = maxPrice - minPrice;
+
+  const chartW = width - padLeft - padRight;
+  const chartH = height - padTop - padBottom;
+
+  const coords = prices.map((price, idx) => {
+    const x = padLeft + (idx / (prices.length - 1)) * chartW;
+    const y = padTop + (1 - (price - minPrice) / priceRange) * chartH;
+    return { x: Number(x.toFixed(1)), y: Number(y.toFixed(1)), price };
+  });
+
+  const linePathD = "M " + coords.map((c) => `${c.x},${c.y}`).join(" L ");
+  const lastCoord = coords[coords.length - 1];
+  const firstCoord = coords[0];
+  const bottomY = (height - padBottom).toFixed(1);
+  const areaPathD = `${linePathD} L ${lastCoord.x},${bottomY} L ${firstCoord.x},${bottomY} Z`;
+
+  const currency = quote.currency || currencyForSymbol(quote.symbol || "");
+  const formattedMin = formatPrice(Math.min(...prices), currency);
+  const formattedMax = formatPrice(Math.max(...prices), currency);
+  const formattedCur = formatPrice(quote.price, currency);
+
+  return `
+    <div class="market-svg-chart-wrapper" style="position: relative; width: 100%; height: ${height}px;">
+      <svg class="market-svg-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width: 100%; height: 100%; overflow: visible;">
+        <defs>
+          <linearGradient id="${chartId}-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="${strokeColor}" stop-opacity="0.32" />
+            <stop offset="65%" stop-color="${strokeColor}" stop-opacity="0.08" />
+            <stop offset="100%" stop-color="${strokeColor}" stop-opacity="0.0" />
+          </linearGradient>
+          <filter id="${chartId}-glow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="${strokeColor}" flood-opacity="0.3" />
+          </filter>
+        </defs>
+
+        <!-- Grid Guide Lines -->
+        <line x1="${padLeft}" y1="${padTop}" x2="${width - padRight}" y2="${padTop}" stroke="currentColor" stroke-opacity="0.08" stroke-dasharray="3 3" />
+        <line x1="${padLeft}" y1="${(padTop + chartH / 2).toFixed(1)}" x2="${width - padRight}" y2="${(padTop + chartH / 2).toFixed(1)}" stroke="currentColor" stroke-opacity="0.06" stroke-dasharray="2 2" />
+        <line x1="${padLeft}" y1="${bottomY}" x2="${width - padRight}" y2="${bottomY}" stroke="currentColor" stroke-opacity="0.08" />
+
+        <!-- Area Gradient Fill -->
+        <path class="chart-area-anim" d="${areaPathD}" fill="url(#${chartId}-grad)" />
+
+        <!-- Animated Trend Line -->
+        <path class="chart-line-anim" d="${linePathD}" fill="none" stroke="${strokeColor}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" filter="url(#${chartId}-glow)" />
+
+        <!-- Price Dot on latest point -->
+        <circle class="chart-dot-ring" cx="${lastCoord.x}" cy="${lastCoord.y}" r="8" fill="${strokeColor}" opacity="0.25" />
+        <circle class="chart-dot-pulse" cx="${lastCoord.x}" cy="${lastCoord.y}" r="4" fill="${strokeColor}" stroke="#ffffff" stroke-width="1.8" />
+      </svg>
+      <div class="market-chart-overlay-labels">
+        <span class="market-chart-lbl max-lbl">${formattedMax}</span>
+        <span class="market-chart-lbl min-lbl">${formattedMin}</span>
+        <span class="market-chart-badge-price" style="background: ${strokeColor};">${formattedCur}</span>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Generate HTML for an interactive equity card embedded inside assistant chat messages.
+ */
+function renderChatEquityCardHtml(quote) {
+  if (!quote) return "";
+  const currency = quote.currency || currencyForSymbol(quote.symbol || "");
+  const up =
+    Number(quote.change) >= 0 ||
+    (typeof quote.changePercent === "string" && !quote.changePercent.startsWith("-"));
+  const changeColor = up ? "#10b981" : "#ef4444";
+  const changeSign = up ? "+" : "";
+  const formattedPrice = formatPrice(quote.price, currency);
+  const changeText = `${changeSign}${Number.isFinite(quote.change) ? quote.change.toFixed(2) : "0.00"} (${quote.changePercent ?? "0.00%"})`;
+
+  const chartHtml = renderStockSvgChart(quote, 290, 105);
+
+  return `
+    <div class="chat-equity-inner">
+      <div class="chat-equity-head">
+        <div class="chat-equity-id">
+          <span class="chat-equity-sym">${escapeHtml(quote.symbol)}</span>
+          <span class="chat-equity-name">${escapeHtml(quote.name || "")}</span>
+        </div>
+        <div class="chat-equity-price-box">
+          <span class="chat-equity-price">${formattedPrice}</span>
+          <span class="chat-equity-change" style="color: ${changeColor};">${escapeHtml(changeText)}</span>
+        </div>
+      </div>
+      <div class="chat-equity-chart-box">
+        ${chartHtml}
+      </div>
+      <div class="chat-equity-footer">
+        <div class="chat-equity-stats">
+          <span>Range: ${formatPrice(quote.dayLow, currency)} – ${formatPrice(quote.dayHigh, currency)}</span>
+          ${quote.volume ? `<span>Vol: ${(quote.volume >= 1e6 ? (quote.volume / 1e6).toFixed(1) + 'M' : quote.volume.toLocaleString())}</span>` : ""}
+        </div>
+        <button type="button" class="chat-equity-view-btn">View on Stage ↗</button>
+      </div>
+    </div>
+  `;
+}
+
+/** The "bigger display" — a single stock's quote, day range, animated chart, and news,
+ * replacing the list and widening the panel (see .market-panel[data-view]
+ * in style.css). */
+async function openStockDetail(symbol) {
+  await ensureMarketWatchlistLoaded();
+  signPanel.hidden = true;
+  signPanel.classList.remove("sign-panel-hero", "sign-panel-pair");
+  stageEl.classList.remove("signs-open");
+  clearSignWalkthrough();
+  closeExamPanel();
+
+  marketPanel.hidden = false;
+  stageEl.classList.add("market-open");
+
+  const entry = findWatchlistEntry(symbol) || { symbol, name: symbol };
+  marketPanel.dataset.view = "detail";
+  marketPanelTitle.textContent = `📈 ${symbol}`;
+
+  marketPanelBody.innerHTML = `
+    <button type="button" id="market-detail-back" class="market-detail-back">← Back to list</button>
+    <div id="market-detail-content"><div class="market-notice">Loading real-time data for ${escapeHtml(entry?.name ?? symbol)}…</div></div>
+  `;
+  document
+    .getElementById("market-detail-back")
+    .addEventListener("click", () => renderMarketList());
+
+  const [quote, news] = await Promise.all([fetchQuote(symbol), fetchNews(symbol)]);
+  renderStockDetail(entry, symbol, quote, news);
+}
+
+function renderStockDetail(entry, symbol, quote, news) {
+  const content = document.getElementById("market-detail-content");
+  if (!content) return; // user navigated away while this was loading
+
+  if (!quote || quote.error) {
+    content.innerHTML = `<div class="market-notice">Couldn't load a quote for ${escapeHtml(symbol)}: ${escapeHtml(quote?.error ?? "unknown error")}</div>`;
+    return;
+  }
+
+  const currency = quote.currency || currencyForSymbol(symbol);
+  const up =
+    Number(quote.change) >= 0 ||
+    (typeof quote.changePercent === "string" && !quote.changePercent.startsWith("-"));
+  const asOfText = quote.asOf ? new Date(quote.asOf).toLocaleString() : "unknown";
+  const displayName = quote.name || entry?.name || symbol;
+  const chartHtml = renderStockSvgChart(quote, 360, 160);
+
+  content.innerHTML = `
+    <div class="market-detail-header">
+      <div class="market-detail-top-row">
+        <div>
+          <p class="market-detail-symbol">${escapeHtml(symbol)}</p>
+          <p class="market-detail-company">${escapeHtml(displayName)}</p>
+        </div>
+        <span class="market-live-pill"><span class="live-dot"></span> LIVE DATA</span>
+      </div>
+      <div class="market-detail-price-row">
+        <span class="market-detail-price">${formatPrice(quote.price, currency)}</span>
+        <span class="market-detail-change" style="color:${up ? "#10b981" : "#ef4444"}">
+          ${up ? "+" : ""}${Number.isFinite(quote.change) ? quote.change.toFixed(2) : "—"} (${quote.changePercent ?? "—"}%)
+        </span>
+      </div>
+      <p class="market-detail-asof">As of ${escapeHtml(asOfText)}${quote.tradingDay ? ` · trading day ${escapeHtml(quote.tradingDay)}` : ""}${quote.cached ? " · cached" : ""}</p>
+    </div>
+
+    <!-- Animated Interactive Equity Visual Chart -->
+    <div class="market-chart-container">
+      <div class="market-chart-header">
+        <span class="market-chart-title">Price Trend & Movement</span>
+        <span class="market-chart-badge ${up ? 'up' : 'down'}">${up ? '▲ Bullish' : '▼ Bearish'}</span>
+      </div>
+      ${chartHtml}
+    </div>
+
+    <div class="market-stat-grid">
+      <div class="market-stat"><p class="market-stat-label">Day High</p><p class="market-stat-value">${formatPrice(quote.dayHigh, currency)}</p></div>
+      <div class="market-stat"><p class="market-stat-label">Day Low</p><p class="market-stat-value">${formatPrice(quote.dayLow, currency)}</p></div>
+      ${quote.fiftyTwoWeekHigh ? `<div class="market-stat"><p class="market-stat-label">52W High</p><p class="market-stat-value">${formatPrice(quote.fiftyTwoWeekHigh, currency)}</p></div>` : ""}
+      ${quote.fiftyTwoWeekLow ? `<div class="market-stat"><p class="market-stat-label">52W Low</p><p class="market-stat-value">${formatPrice(quote.fiftyTwoWeekLow, currency)}</p></div>` : ""}
+      <div class="market-stat"><p class="market-stat-label">Previous Close</p><p class="market-stat-value">${formatPrice(quote.previousClose, currency)}</p></div>
+      <div class="market-stat"><p class="market-stat-label">Volume</p><p class="market-stat-value">${Number.isFinite(quote.volume) ? quote.volume.toLocaleString() : "—"}</p></div>
+    </div>
+    <p class="market-section-label">Recent News</p>
+    ${
+      news.length
+        ? news
+            .map(
+              (n) => `
+      <div class="market-news-item">
+        <a class="market-news-title" href="${escapeHtml(n.url ?? "#")}" target="_blank" rel="noopener noreferrer">${escapeHtml(n.title ?? "Untitled")}</a>
+        <p class="market-news-meta">${escapeHtml(n.source ?? "")} · ${escapeHtml(formatNewsTimestamp(n.timePublished))}</p>
+      </div>`,
+            )
+            .join("")
+        : `<p class="market-news-meta">No recent news returned for ${escapeHtml(symbol)}.</p>`
+    }
+  `;
+}
+
+// ── Theater mode — compact avatar, outdoor background ────────────────────
+//
+// Shrinks the presenter into a small corner box so a docked side panel
+// (particularly the market "bigger display") gets most of the stage. The
+// SDK has no way to swap just the background/scene on a live presenter —
+// only initializeWithConnectKey() can, and that's a full reload — so
+// turning this on relaunches onto the Outdoor scene if it isn't already
+// active (same constraint as the Face-framing CSS fallback and the persona-
+// preset relaunch elsewhere in this file), and turning it off restores
+// whatever scene was active before.
+
+let theaterModePreviousSceneId = null;
+
+async function toggleTheaterMode() {
+  const enabling = !stageEl.classList.contains("theater-mode");
+  stageEl.classList.toggle("theater-mode", enabling);
+  theaterModeBtn.classList.toggle("active", enabling);
+  theaterModeBtn.setAttribute("aria-pressed", String(enabling));
+
+  if (enabling) theaterModePreviousSceneId = sceneSelect.value;
+
+  const targetScene = enabling
+    ? findAssetByName(scenes, "sova_Outdoor_8")
+    : scenes.find((s) => s.id === theaterModePreviousSceneId);
+
+  if (targetScene && sceneSelect.value !== targetScene.id) {
+    sceneSelect.value = targetScene.id;
+    sceneSelect.dispatchEvent(new Event("change"));
+    if (presenterReady && !isLaunching) {
+      setStatus(
+        enabling ? "Loading outdoor scene for compact view…" : "Restoring previous scene…",
+      );
+      launchPresenter();
+    }
+  }
+
+  // Nudges the presenter's internal render target to recompute against its
+  // new CSS box — same pattern as applyFraming()'s resize dispatch.
+  window.setTimeout(() => window.dispatchEvent(new Event("resize")), 60);
+}
+
+theaterModeBtn.addEventListener("click", () => toggleTheaterMode());
+
+// ── Stock-lookup chat intent ──────────────────────────────────────────────
+//
+// A watchlist ticker or company name mentioned while the Equity Analyst
+// persona is active answers with real fetched numbers instead of an LLM
+// guess — same reasoning as the exam engine answering locally rather than
+// asking the chatbot to "describe" a quiz UI it doesn't control. This is
+// also what equity_analyst_prompt.md itself asks for: "state the timestamp
+// for every number", and "if a data point can't be verified from a live
+// source, say so explicitly rather than estimating."
+
+// Requiring the *entire* "Toyota Motor Corp" as one substring never matches
+// how anyone actually talks ("how's Toyota doing?") — this instead picks
+// one distinctive word from the company name (skipping short/common ones a
+// few tickers happen to start with — "Arm", "Advanced", "Tokyo" — since
+// those would false-positive on ordinary sentences) and matches that as a
+// whole word, case-insensitively. Tickers match too, but case-SENSITIVE
+// against the original text: several in this watchlist (ARM, AMD, ANET,
+// ZTS) are also-real words or common abbreviations in lowercase, and a
+// capitalized "ARM"/"AMD" is a much stronger signal the user means the
+// stock than a bare case-insensitive substring would be.
+const GENERIC_COMPANY_WORDS = new Set([
+  "advanced",
+  "applied",
+  "arm",
+  "alpha",
+  "tokyo",
+  "can",
+  "shin-etsu", // fine on its own, but pairs oddly short with hyphen matching — keep on the safe list anyway
+]);
+
+function companyBrandWord(name) {
+  const words = name.split(/\s+/);
+  for (const w of words.slice(0, 2)) {
+    const clean = w.replace(/[().,]/g, "");
+    if (clean.length >= 4 && !GENERIC_COMPANY_WORDS.has(clean.toLowerCase())) {
+      return clean;
+    }
+  }
+  return null;
+}
+
+const POPULAR_TICKER_MAP = {
+  apple: "AAPL",
+  aapl: "AAPL",
+  nvidia: "NVDA",
+  nvda: "NVDA",
+  tesla: "TSLA",
+  tsla: "TSLA",
+  microsoft: "MSFT",
+  msft: "MSFT",
+  amazon: "AMZN",
+  amzn: "AMZN",
+  google: "GOOGL",
+  googl: "GOOGL",
+  alphabet: "GOOGL",
+  meta: "META",
+  facebook: "META",
+  palantir: "PLTR",
+  pltr: "PLTR",
+  broadcom: "AVGO",
+  avgo: "AVGO",
+  qualcomm: "QCOM",
+  qcom: "QCOM",
+  amd: "AMD",
+  arm: "ARM",
+  sony: "6758.T",
+  toyota: "7203.T",
+  softbank: "9984.T",
+  honda: "7267.T",
+  hitachi: "6501.T",
+};
+
+/** @param {string} text */
+function findWatchlistMatches(text) {
+  if (!text) return [];
+  const results = [];
+  const seen = new Set();
+
+  const words = text.toLowerCase().split(/[\s,?.!;:()/"']+/);
+  for (const w of words) {
+    if (POPULAR_TICKER_MAP[w]) {
+      const sym = POPULAR_TICKER_MAP[w];
+      if (!seen.has(sym)) {
+        seen.add(sym);
+        const wl = findWatchlistEntry(sym);
+        results.push(wl || { symbol: sym, name: sym });
+      }
+    }
+  }
+
+  if (marketWatchlist) {
+    const all = [...marketWatchlist.us, ...marketWatchlist.japan];
+    for (const entry of all) {
+      if (seen.has(entry.symbol)) continue;
+      const base = entry.symbol.replace(".T", "");
+      const tickerRe = new RegExp(`\\b${base}\\b`, "i");
+      if (tickerRe.test(text)) {
+        seen.add(entry.symbol);
+        results.push(entry);
+        continue;
+      }
+      const brand = companyBrandWord(entry.name);
+      if (brand && new RegExp(`\\b${brand}\\b`, "i").test(text)) {
+        seen.add(entry.symbol);
+        results.push(entry);
+      }
+    }
+  }
+
+  return results;
+}
+
+async function handleStockLookup(entry) {
+  const symbol = entry.symbol;
+  await openStockDetail(symbol);
+
+  let reply;
+  const quote = marketQuoteCache.get(symbol) || await fetchQuote(symbol);
+  if (!quote || quote.error) {
+    reply = `I couldn't verify a live quote for ${entry.name || symbol}, ticker ${symbol}, just now (${quote?.error ?? "no data returned"}) — the panel has whatever details are available.`;
+  } else {
+    const currency = quote.currency || currencyForSymbol(symbol);
+    const up =
+      Number(quote.change) >= 0 ||
+      (typeof quote.changePercent === "string" && !quote.changePercent.startsWith("-"));
+    reply =
+      `${quote.name || entry.name || symbol}, ticker ${symbol}, is currently trading at ${formatPrice(quote.price, currency)}, ` +
+      `${up ? "up" : "down"} ${Math.abs(quote.change).toFixed(2)} (${quote.changePercent}%) today. ` +
+      `Today's range is ${formatPrice(quote.dayLow, currency)} to ${formatPrice(quote.dayHigh, currency)}. ` +
+      `I've rendered the animated live chart on your stage.`;
+  }
+
+  appendChat("assistant", reply, quote && !quote.error ? quote : null);
+  chatHistory.push({ role: "assistant", text: reply });
+  if (isSpeaking) interruptSpeaking();
+  speak(reply).then((queued) => {
+    if (!queued) setSpeaking(false);
+  });
+}
+
 /**
  * Send `text` through the active source (Connect chatbot or own LLM) and hand
  * the reply to the presenter. The one path both typed submissions and voice
@@ -1728,6 +3114,29 @@ async function submitChatMessage(text) {
       : text;
   chatHistory.push({ role: "user", text: promptText });
 
+  // Exam start is handled entirely client-side, like the scripted persona
+  // greetings — no reason to spend an LLM round-trip asking it to describe
+  // opening a UI panel it doesn't control.
+  if (activePersona === "driving" && isExamIntent(text)) {
+    openExamPanel(true);
+    setAwaitingReply(false);
+    presenter.setThinking?.(false);
+    return;
+  }
+
+  // A watchlist ticker/company mention answers with real fetched data
+  // unless user explicitly asks for deep analysis.
+  if (activePersona === "equity") {
+    const matches = findWatchlistMatches(text);
+    const isDeepAnalysis = /(why|analyze|analysis|compare|growth|thesis|valuation|outlook|future|prospect|fundamental|report)/i.test(text);
+    if (matches.length > 0 && !isDeepAnalysis) {
+      await handleStockLookup(matches[0]);
+      setAwaitingReply(false);
+      presenter.setThinking?.(false);
+      return;
+    }
+  }
+
   // Signal "thinking" on the presenter while the LLM processes the request
   appendDebug("cmd", "presenter.setThinking(true)");
   presenter.setThinking?.(true);
@@ -1750,6 +3159,7 @@ async function submitChatMessage(text) {
     // and from `reply` onward the code is shared again.
     let reply = null;
     let failureReason = null;
+    let stockQuote = null;
 
     if (source === "connect") {
       // POST /api/chatbots/:id/chat → { id, status, reply_text }
@@ -1766,7 +3176,7 @@ async function submitChatMessage(text) {
             : `Unexpected response (status: ${res.status}).`;
       }
     } else {
-      // POST /api/chat → OpenAI-compatible { choices: [{ message: { content } }] }
+      // POST /api/chat → OpenAI-compatible { choices: [{ message: { content } }], stockQuote }
       const res = await request(route, {
         method: "POST",
         body: {
@@ -1777,19 +3187,49 @@ async function submitChatMessage(text) {
         },
       });
       reply = res.choices?.[0]?.message?.content?.trim() || null;
+      if (res.stockQuote) {
+        stockQuote = res.stockQuote;
+      }
       if (!reply) failureReason = "The model returned an empty reply.";
     }
 
     if (reply) {
-      appendChat("assistant", reply);
+      if (stockQuote && stockQuote.symbol) {
+        marketQuoteCache.set(stockQuote.symbol, stockQuote);
+        openStockDetail(stockQuote.symbol);
+      } else if (activePersona === "equity") {
+        const matches = findWatchlistMatches(`${text} ${reply}`);
+        if (matches.length > 0) {
+          const sym = matches[0].symbol;
+          const q = marketQuoteCache.get(sym) || await fetchQuote(sym);
+          if (q && !q.error) {
+            stockQuote = q;
+            openStockDetail(sym);
+          }
+        }
+      }
+
+      appendChat("assistant", reply, stockQuote);
       appendDebug(
         "ok",
         `Reply: “${reply.length > 60 ? reply.slice(0, 60) + "…" : reply}”`,
       );
       // Add assistant turn to history so follow-up messages have full context
       chatHistory.push({ role: "assistant", text: reply });
+      // Driving Instruction only — checks both the question and the reply,
+      // so "show me the signs" (a generic request the reply might just
+      // acknowledge without repeating every name) still matches.
+      let mentionedSigns = [];
+      if (activePersona === "driving") {
+        mentionedSigns = checkForRoadSigns(`${text} ${reply}`);
+      }
       // Hand the reply text to the presenter for speech + motion playback
       queued = await speak(reply);
+      // Only start the walkthrough once speech was actually queued — no
+      // point advancing highlights against narration that never plays.
+      if (queued && mentionedSigns.length > 0) {
+        startSignWalkthrough(mentionedSigns, reply);
+      }
     } else {
       // Roll back the user turn — no usable assistant reply was produced.
       // Without this pop, the orphaned user turn would be re-sent on every
@@ -1860,6 +3300,27 @@ let micErrorCode = null;
 let liveModeRestartTimer = null;
 /** SpeechRecognition instance. */
 let recognition = null;
+
+// Live Mode "wait for a real pause" timer (system prompt spec §1.4): ~2–3s
+// of continued silence, not the browser's own (shorter, unpredictable)
+// speechend heuristic, is what decides the user is done talking.
+const LIVE_MODE_SILENCE_MS = 2500;
+let liveSilenceTimer = null;
+
+function armLiveSilenceTimer() {
+  clearLiveSilenceTimer();
+  liveSilenceTimer = setTimeout(() => {
+    liveSilenceTimer = null;
+    if (isListening) recognition.stop(); // → 'end' handler submits finalTranscript
+  }, LIVE_MODE_SILENCE_MS);
+}
+
+function clearLiveSilenceTimer() {
+  if (liveSilenceTimer) {
+    clearTimeout(liveSilenceTimer);
+    liveSilenceTimer = null;
+  }
+}
 
 // Web Audio API for dynamic voice reactivity
 let audioCtx = null;
@@ -2072,6 +3533,7 @@ if (!micSupported) {
   recognition.addEventListener("start", () => {
     isListening = true;
     micErrorCode = null;
+    clearLiveSilenceTimer(); // a stale timer from a prior session must not fire into this one
     micBtn.classList.add("listening");
     micBtn.title = "Stop voice input";
     micBtn.setAttribute("aria-label", "Stop voice input");
@@ -2091,10 +3553,21 @@ if (!micSupported) {
     const current = (finalTranscript + interim).trim();
     chatInput.value = current;
     updateListeningInterim(current);
+    // Live Mode pause-then-submit (system prompt spec §1.4): every new
+    // result — final or still-interim — means the user is still talking, so
+    // push the deadline out another LIVE_MODE_SILENCE_MS rather than cutting
+    // them off after a short breath. speechend below is deliberately a no-op
+    // in Live Mode; this timer is what actually decides "done speaking" here.
+    if (isLiveMode) armLiveSilenceTimer();
   });
 
   recognition.addEventListener("speechend", () => {
-    recognition.stop();
+    // Manual single-shot mic click: stop as soon as the browser's own
+    // endpointing says speech ended — no extra wait, matching the pre-Live-
+    // Mode behavior. In Live Mode, armLiveSilenceTimer() (above) owns this
+    // decision instead, on its own explicit ~2.5s clock, since the point of
+    // Live Mode is not reacting to a normal mid-sentence breath as "done".
+    if (!isLiveMode) recognition.stop();
   });
 
   recognition.addEventListener("error", (e) => {
@@ -2117,6 +3590,7 @@ if (!micSupported) {
 
   recognition.addEventListener("end", () => {
     isListening = false;
+    clearLiveSilenceTimer(); // this session is over regardless of what ended it
     micBtn.classList.remove("listening");
     micBtn.title = "Voice input";
     micBtn.setAttribute("aria-label", "Start voice input");

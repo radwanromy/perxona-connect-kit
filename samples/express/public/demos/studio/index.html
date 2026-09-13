@@ -31,6 +31,48 @@
           <span class="theme-picker-label">Theme</span>
           <select id="theme-select" aria-label="Theme"></select>
         </label>
+
+        <!-- ── Motion picker + framing controls ─────────────────────── -->
+        <!-- Lives in the header (not floating over .stage) so it stays
+             reachable regardless of whether the Road Signs panel is open.
+             Motion list is real, fetched from the existing
+             GET /api/avatars/:id/motions proxy (see server.mjs); triggering
+             reuses presenter.playMotion(), logged through appendDebug()
+             exactly like every other presenter command in this file. -->
+        <div class="header-avatar-controls">
+          <div class="motion-picker" id="motion-picker">
+            <button
+              type="button"
+              id="motion-picker-toggle"
+              class="stage-float-btn"
+              title="Motions"
+              aria-label="Open motion picker"
+              aria-haspopup="listbox"
+              aria-expanded="false"
+            >
+              Motion
+            </button>
+            <div id="motion-picker-popup" class="motion-picker-popup" hidden>
+              <p class="motion-picker-title">Motions</p>
+              <ul
+                id="motion-picker-list"
+                class="motion-picker-list"
+                role="listbox"
+                aria-label="Motions"
+              ></ul>
+            </div>
+          </div>
+          <select
+            id="framing-select"
+            class="framing-select"
+            aria-label="Avatar framing"
+            title="Avatar framing"
+          >
+            <option value="mid">Mid</option>
+            <option value="full">Full</option>
+            <option value="face">Face</option>
+          </select>
+        </div>
       </div>
     </header>
 
@@ -445,50 +487,145 @@
           </div>
           </div>
 
-          <!-- ── Motion picker + framing controls ─────────────────────── -->
-          <!-- Persistent (not hover-gated like the toolbar above) — floats
-               top-right of .stage. Motion list is real, fetched from the
-               existing GET /api/avatars/:id/motions proxy (previously
-               unused by the frontend — see server.mjs); triggering reuses
-               presenter.playMotion(), logged through appendDebug() exactly
-               like every other presenter command in this file. -->
-          <div class="stage-controls">
-            <div class="motion-picker" id="motion-picker">
+          <!-- ── Road sign panel (Driving Instruction persona) ─────────── -->
+          <!-- Docked to the stage's own bounds (a "dedicated area of the
+               scene", not a chat-log thumbnail) — see checkForRoadSigns()
+               and renderSignPanel() in app.js. Opens automatically the
+               first time a sign is mentioned while the Driving Instruction
+               persona is active; the detail slider persists via
+               localStorage across sessions. -->
+          <div id="sign-panel" class="sign-panel" hidden data-detail="compact">
+            <div class="sign-panel-header">
+              <span class="sign-panel-title">🚦 Road Signs</span>
               <button
                 type="button"
-                id="motion-picker-toggle"
-                class="stage-float-btn"
-                title="Motions"
-                aria-label="Open motion picker"
-                aria-haspopup="listbox"
-                aria-expanded="false"
+                id="sign-panel-close"
+                class="icon-btn"
+                aria-label="Close sign panel"
+                title="Close"
               >
-                Motion
+                ✕
               </button>
+            </div>
+            <div
+              id="sign-panel-body"
+              class="sign-panel-body"
+              role="list"
+              aria-label="Road signs"
+            ></div>
+            <!-- Persistent footer, not hover-gated like .stage-toolbar — the
+                 header-only slider used to sit under that toolbar's overlap
+                 zone while hovering the stage, making it unreliable to hit.
+                 Two explicit buttons (not a range slider) so a tap always
+                 lands on the mode it names, with a large, unambiguous
+                 hit area on each side. -->
+            <div class="sign-panel-footer">
               <div
-                id="motion-picker-popup"
-                class="motion-picker-popup"
-                hidden
+                class="sign-detail-switch"
+                role="group"
+                aria-label="Sign panel detail level"
               >
-                <p class="motion-picker-title">Motions</p>
-                <ul
-                  id="motion-picker-list"
-                  class="motion-picker-list"
-                  role="listbox"
-                  aria-label="Motions"
-                ></ul>
+                <button
+                  type="button"
+                  id="sign-detail-compact-btn"
+                  class="sign-detail-option"
+                  data-value="compact"
+                  aria-pressed="false"
+                >
+                  Compact
+                </button>
+                <button
+                  type="button"
+                  id="sign-detail-detailed-btn"
+                  class="sign-detail-option"
+                  data-value="detailed"
+                  aria-pressed="false"
+                >
+                  Detailed
+                </button>
               </div>
             </div>
-            <select
-              id="framing-select"
-              class="framing-select"
-              aria-label="Avatar framing"
-              title="Avatar framing"
-            >
-              <option value="mid">Mid</option>
-              <option value="full">Full</option>
-              <option value="face">Face</option>
-            </select>
+          </div>
+
+          <!-- ── Driving exam panel (Driving Instruction persona) ──────── -->
+          <!-- Docked to the same stage right-edge as #sign-panel, sharing
+               its positioning/backdrop via the .side-panel base rule in
+               style.css — only one of the two is ever open at once (see
+               openExamPanel()/closeExamPanel() in app.js). Questions come
+               from exam-questions.js, grounded in the official traffic-
+               light and road-sign rule book uploaded to this chatbot's
+               knowledge base. -->
+          <div id="exam-panel" class="exam-panel" hidden>
+            <div class="exam-panel-header">
+              <span class="exam-panel-title">📝 Driving Exam</span>
+              <button
+                type="button"
+                id="exam-panel-close"
+                class="icon-btn"
+                aria-label="Close exam"
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
+            <div class="exam-panel-progress">
+              <div class="exam-progress-track">
+                <div id="exam-progress-fill" class="exam-progress-fill"></div>
+              </div>
+              <span id="exam-progress-text" class="exam-progress-text"
+                >Question 1 of 20</span
+              >
+            </div>
+            <div
+              id="exam-panel-body"
+              class="exam-panel-body"
+              aria-live="polite"
+            ></div>
+            <div class="exam-panel-footer">
+              <span id="exam-score-text" class="exam-score-text"
+                >Score: 0 / 0</span
+              >
+              <button
+                type="button"
+                id="exam-review-btn"
+                class="exam-review-btn"
+              >
+                Review Answers
+              </button>
+            </div>
+          </div>
+
+          <!-- ── Market watchlist panel (Equity Analyst persona) ─────────── -->
+          <!-- Docked to the same stage right-edge as #sign-panel/#exam-panel
+               (shared .side-panel base in style.css) — only one of the three
+               is ever open at once. "list" shows every watchlist ticker with
+               its last-known price; clicking one switches to "detail" (the
+               "bigger display" — quote, day range, news) and widens the
+               panel, same idiom as the sign panel's compact/detailed width
+               change. Quotes/news come from GET /api/stocks/:symbol/quote
+               and /news (server.mjs), which need ALPHA_VANTAGE_API_KEY set
+               — see renderMarketList()/openStockDetail() in app.js for the
+               honest "not connected" state when it isn't. -->
+          <div id="market-panel" class="market-panel" hidden data-view="list">
+            <div class="market-panel-header">
+              <span id="market-panel-title" class="market-panel-title"
+                >📈 Market Watchlist</span
+              >
+              <button
+                type="button"
+                id="market-panel-close"
+                class="icon-btn"
+                aria-label="Close market watchlist"
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
+            <div
+              id="market-panel-body"
+              class="market-panel-body"
+              aria-live="polite"
+            ></div>
           </div>
 
           <div id="stage-placeholder" class="placeholder">
@@ -599,6 +736,38 @@
                 title="Switch to Real-Time Equity Analyst"
               >
                 Equity Analyst
+              </button>
+            </div>
+
+            <!-- Driving Instruction-only — shown/hidden by setActivePersona()
+                 in app.js, same as the sign panel. Typing something like
+                 "start a driving exam" while that persona is active opens
+                 the same panel (see checkForExamIntent() in app.js); this
+                 button is the reliable, no-typing way in. -->
+            <button
+              type="button"
+              id="exam-start-btn"
+              class="exam-start-btn"
+              hidden
+            >
+              📝 Take a Driving Exam
+            </button>
+
+            <!-- Equity Analyst-only — shown/hidden by setActivePersona() in
+                 app.js. Opens #market-panel (see below); asking about a
+                 watchlist ticker by name in chat opens it too (see
+                 checkForStockIntent() in app.js). -->
+            <div id="equity-controls" class="equity-controls" hidden>
+              <button type="button" id="market-open-btn" class="exam-start-btn">
+                📈 Open Market Watchlist
+              </button>
+              <button
+                type="button"
+                id="theater-mode-btn"
+                class="exam-start-btn"
+                aria-pressed="false"
+              >
+                🎬 Compact Avatar (Outdoor)
               </button>
             </div>
 

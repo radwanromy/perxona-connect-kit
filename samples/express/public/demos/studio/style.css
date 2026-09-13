@@ -1092,27 +1092,29 @@ details[open] summary::before {
   font-size: 0.78rem;
 }
 
-/* ── Stage controls: motion picker + framing select ─────────────────────
-   Persistent (not hover-gated like .stage-toolbar) — floats top-right. */
+/* ── Header controls: motion picker + framing select ─────────────────────
+   Lives in .app-header-controls, right after the theme picker — reachable
+   regardless of whether the Road Signs panel is open (previously floated
+   over .stage instead; see the Road sign panel comment below). Reuses the
+   .stage-float-btn / .framing-select styling from that earlier placement,
+   but on the normal header surface rather than over the 3D scene, so those
+   two are restyled here to use standard header tokens instead of the
+   stage-overlay ones. */
 
-.stage-controls {
-  position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
-  z-index: 31;
+.header-avatar-controls {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.5rem;
 }
 
-.stage-float-btn {
+.header-avatar-controls .stage-float-btn {
   width: auto;
   min-height: 32px;
   padding: 0.35rem 0.65rem;
   border-radius: 6px;
-  background: var(--stage-overlay-bg);
-  border: 1px solid var(--stage-overlay-border);
-  color: var(--stage-overlay-text);
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
   font-size: 0.82rem;
   font-weight: 500;
   display: inline-flex;
@@ -1122,14 +1124,19 @@ details[open] summary::before {
   line-height: 1;
 }
 
-.stage-float-btn:hover:not(:disabled) {
+.header-avatar-controls .stage-float-btn:hover:not(:disabled),
+.header-avatar-controls .stage-float-btn[aria-expanded="true"] {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.stage-float-btn[aria-expanded="true"] {
-  border-color: var(--accent);
-  color: var(--accent);
+.header-avatar-controls .framing-select {
+  width: auto;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.82rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
 }
 
 .motion-picker {
@@ -1187,15 +1194,6 @@ details[open] summary::before {
   cursor: default;
 }
 
-.framing-select {
-  width: auto;
-  padding: 0.4rem 0.6rem;
-  font-size: 0.82rem;
-  background: var(--stage-overlay-bg);
-  border: 1px solid var(--stage-overlay-border);
-  color: var(--stage-overlay-text);
-}
-
 /* ── Avatar framing (Face) ────────────────────────────────────────────────
    CameraAngle only has two SDK presets (fullbody/halfbody — see
    applyFraming() in app.js); "Face" has no matching preset, so it layers a
@@ -1212,6 +1210,1191 @@ sv-presenter.framing-face {
      translateY needed on top of it. */
   transform: scale(1.5);
   transform-origin: center 18%;
+}
+
+/* ── Camera shift when a side panel is open ────────────────────────────────
+   Slides the avatar frame left to make visual room for the sign grid or
+   exam panel docked on the right, returning to center when it closes.
+   app.js toggles .stage's "signs-open" (sign panel) or "exam-open" (exam
+   panel) class alongside the panel's hidden state — never both at once,
+   since only one panel is ever open. translateX() uses a percentage of the
+   presenter's own box, so it composes with the Face framing scale() above
+   regardless of which framing is active — no separate rule needed per
+   framing. */
+sv-presenter,
+#stage-placeholder {
+  transition: transform 0.35s ease;
+}
+
+.stage.signs-open sv-presenter,
+.stage.signs-open #stage-placeholder,
+.stage.exam-open sv-presenter,
+.stage.exam-open #stage-placeholder,
+.stage.market-open sv-presenter,
+.stage.market-open #stage-placeholder {
+  transform: translateX(-12%);
+}
+
+.stage.signs-open sv-presenter.framing-face,
+.stage.exam-open sv-presenter.framing-face,
+.stage.market-open sv-presenter.framing-face {
+  transform: translateX(-12%) scale(1.5);
+}
+
+/* ── Docked side panels ────────────────────────────────────────────────────
+   Shared base for #sign-panel, #exam-panel, and #market-panel — all three
+   dock to the stage's own right edge as a real, sizeable "screen" within
+   the scene rather than a chat-log thumbnail, and only one is ever open at
+   a time (see openExamPanel()/checkForRoadSigns()/openMarketPanel() in
+   app.js). z-index sits ABOVE .stage-toolbar (30) — it used to sit below,
+   which let the toolbar's hover-revealed Avatar/Scene/etc row (it spans the
+   full stage width, .stage-toolbar's left:0/right:0) intercept clicks meant
+   for a panel's own controls whenever both were visible at once. Panel
+   content is opaque (blur + near-solid background below), so anything from
+   the toolbar that would render underneath in the overlap region is hidden
+   by it rather than showing through, which is the point. Motion/framing
+   controls used to float in this corner too; they now live in the header
+   (see .header-avatar-controls), so there's no overlap to guard against. */
+
+.sign-panel,
+.exam-panel,
+.market-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 35;
+  width: 40%;
+  min-width: 260px;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--stage-bg) 93%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-left: 1px solid var(--stage-overlay-border);
+  box-shadow: -8px 0 28px rgba(0, 0, 0, 0.28);
+  transition: width 0.25s ease;
+}
+
+.exam-panel {
+  width: 46%;
+  max-width: 520px;
+}
+
+.market-panel {
+  width: 42%;
+  max-width: 480px;
+}
+
+/* "Bigger display" — the single-stock detail view (chart, day range, news)
+   gets meaningfully more room than the list, same idiom as the sign panel's
+   compact/detailed width change. */
+.market-panel[data-view="detail"] {
+  width: 60%;
+  max-width: 680px;
+}
+
+.sign-panel[data-detail="detailed"] {
+  width: 62%;
+  max-width: 640px;
+}
+
+/* 1-sign "hero" and 2-sign "pair" auto-layouts (see applySignPanelLayout()
+   in app.js) get extra room so a lone card isn't stranded in a mostly-empty
+   detailed-width panel. */
+.sign-panel.sign-panel-hero,
+.sign-panel.sign-panel-pair {
+  width: 56%;
+  max-width: 560px;
+}
+
+.sign-panel-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.65rem 0.9rem;
+  border-bottom: 1px solid var(--stage-overlay-border);
+  background: color-mix(in srgb, var(--stage-overlay-text) 3%, transparent);
+}
+
+.sign-panel-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--stage-overlay-text);
+}
+
+.sign-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.85rem;
+  /* A subtle radial glow (not flat gray) so hero/pair mode — where a card
+     or two sits inside a lot of room — still reads as an intentional,
+     framed space rather than empty background. */
+  background: radial-gradient(
+    120% 90% at 50% 0%,
+    color-mix(in srgb, var(--accent) 5%, transparent) 0%,
+    transparent 65%
+  );
+}
+
+/* ── Footer: persistent Compact/Detailed switch ───────────────────────────
+   Always in the panel's own flex flow (not absolutely positioned, not
+   hover-gated), so it can never be covered by a stage overlay and never
+   competes for space with the header. */
+.sign-panel-footer {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  padding: 0.7rem 0.9rem;
+  border-top: 1px solid var(--stage-overlay-border);
+  background: color-mix(in srgb, var(--stage-overlay-text) 3%, transparent);
+}
+
+.sign-detail-switch {
+  display: flex;
+  width: 100%;
+  max-width: 280px;
+  padding: 3px;
+  background: color-mix(in srgb, var(--stage-overlay-text) 8%, transparent);
+  border: 1px solid var(--stage-overlay-border);
+  border-radius: 999px;
+}
+
+/* Large, unambiguous tap targets — each button sets its own named mode
+   directly (not a track you have to land a thumb on), addressing the
+   "toggle is hard to reach/hit precisely" issue head-on. */
+.sign-detail-option {
+  flex: 1;
+  padding: 0.55rem 0.75rem;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--stage-overlay-text-dim);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.sign-detail-option:hover {
+  color: var(--stage-overlay-text);
+}
+
+.sign-detail-option.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ── Sign cards ────────────────────────────────────────────────────────── */
+
+.sign-card {
+  animation: sign-card-fade-in 0.25s ease;
+}
+
+@keyframes sign-card-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sign-card-svg,
+.sign-card-japanese,
+.sign-card-name,
+.sign-card-english {
+  transition: width 0.25s ease, height 0.25s ease, font-size 0.25s ease,
+    margin 0.25s ease;
+}
+
+.sign-card-svg svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Compact: a flowing grid of small icon+name cells — many signs visible at once. */
+.sign-panel[data-detail="compact"] .sign-panel-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 0.7rem;
+}
+
+.sign-panel[data-detail="compact"] .sign-card {
+  width: 110px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  text-align: center;
+  padding: 0.6rem 0.5rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--stage-overlay-text) 4%, transparent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition: background 0.25s ease, outline-color 0.25s ease,
+    box-shadow 0.2s ease;
+}
+
+.sign-panel[data-detail="compact"] .sign-card-svg {
+  width: 56px;
+  height: 56px;
+}
+
+/* Japanese + Romaji + English are always shown (per spec) — compact mode
+   just keeps every field smaller and tighter than detailed mode, rather
+   than hiding any of them. */
+.sign-panel[data-detail="compact"] .sign-card-japanese {
+  font-size: 0.68rem;
+  color: var(--stage-overlay-text);
+  line-height: 1.2;
+}
+
+.sign-panel[data-detail="compact"] .sign-card-english {
+  font-size: 0.62rem;
+  color: var(--stage-overlay-text-dim);
+  line-height: 1.25;
+}
+
+.sign-panel[data-detail="compact"] .sign-card-name {
+  font-size: 0.66rem;
+  color: var(--stage-overlay-text-dim);
+  line-height: 1.25;
+}
+
+/* Detailed: full cards, one per row (3+ signs, scrollable), every field
+   shown and legible — the fallback when data-detail="detailed" isn't also
+   a hero/pair layout (see below). */
+.sign-panel[data-detail="detailed"] .sign-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.sign-panel[data-detail="detailed"] .sign-card {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  padding: 1rem;
+  border: 1px solid var(--stage-overlay-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--stage-overlay-text) 4%, transparent);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+}
+
+.sign-panel[data-detail="detailed"] .sign-card-svg {
+  width: 96px;
+  height: 96px;
+  flex-shrink: 0;
+}
+
+.sign-panel[data-detail="detailed"] .sign-card-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--stage-overlay-text);
+  margin-bottom: 0.2rem;
+}
+
+.sign-panel[data-detail="detailed"] .sign-card-japanese {
+  font-size: 0.95rem;
+  color: var(--stage-overlay-text);
+  margin-bottom: 0.35rem;
+}
+
+.sign-panel[data-detail="detailed"] .sign-card-english {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--stage-overlay-text-dim);
+}
+
+/* ── Hero (exactly 1 sign) ─────────────────────────────────────────────────
+   Fills the panel with one large, centered card instead of the same small
+   card the compact/plain-detailed layouts would give it, floating in mostly
+   empty space. */
+.sign-panel.sign-panel-hero .sign-panel-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.sign-panel.sign-panel-hero .sign-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 2rem 1.75rem;
+  border: 1px solid var(--stage-overlay-border);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--stage-overlay-text) 5%, transparent);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.28);
+}
+
+.sign-panel.sign-panel-hero .sign-card-svg {
+  width: 200px;
+  height: 200px;
+}
+
+.sign-panel.sign-panel-hero .sign-card-japanese {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--stage-overlay-text);
+  margin-top: 0.4rem;
+}
+
+.sign-panel.sign-panel-hero .sign-card-name {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.sign-panel.sign-panel-hero .sign-card-english {
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--stage-overlay-text-dim);
+  max-width: 34ch;
+}
+
+/* ── Pair (exactly 2 signs) ────────────────────────────────────────────────
+   Both large, sharing the panel's height evenly — no leftover empty gray
+   gap between/below them. */
+.sign-panel.sign-panel-pair .sign-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.sign-panel.sign-panel-pair .sign-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.5rem;
+  padding: 1.25rem;
+  border: 1px solid var(--stage-overlay-border);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--stage-overlay-text) 5%, transparent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+
+.sign-panel.sign-panel-pair .sign-card-svg {
+  width: 130px;
+  height: 130px;
+}
+
+.sign-panel.sign-panel-pair .sign-card-japanese {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--stage-overlay-text);
+}
+
+.sign-panel.sign-panel-pair .sign-card-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.sign-panel.sign-panel-pair .sign-card-english {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--stage-overlay-text-dim);
+  max-width: 40ch;
+}
+
+/* ── Sign-callout walkthrough (Driving Instructor persona) ────────────────
+   Marks the sign currently being narrated as the avatar talks through the
+   panel one sign at a time — see startSignWalkthrough() in app.js. This,
+   not a spatially-aimed presenter gesture, is the real sync mechanism: the
+   SDK's playMotion() has no way to aim a gesture at a screen position, so
+   the pointing motion (when the catalog happens to have one) is a bonus
+   flourish, and this highlight is what actually keeps pace with narration. */
+.sign-card.sign-card-active {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  transition: background 0.25s ease, outline-color 0.25s ease;
+}
+
+/* ── Driving exam panel (Driving Instruction persona) ─────────────────────
+   Positioning/backdrop shared with #sign-panel via the .sign-panel,
+   .exam-panel selector above — only its own header/progress/body/footer
+   content is styled here. See renderExamQuestion() / renderExamReview() in
+   app.js for what gets injected into #exam-panel-body. */
+
+.exam-panel-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.65rem 0.9rem;
+  border-bottom: 1px solid var(--stage-overlay-border);
+  background: color-mix(in srgb, var(--stage-overlay-text) 3%, transparent);
+}
+
+.exam-panel-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--stage-overlay-text);
+}
+
+.exam-panel-progress {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--stage-overlay-border);
+}
+
+.exam-progress-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--stage-overlay-text) 12%, transparent);
+  overflow: hidden;
+}
+
+.exam-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.25s ease;
+}
+
+.exam-progress-text {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  color: var(--stage-overlay-text-dim);
+  white-space: nowrap;
+}
+
+.exam-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.exam-panel-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.65rem 0.9rem;
+  border-top: 1px solid var(--stage-overlay-border);
+  background: color-mix(in srgb, var(--stage-overlay-text) 3%, transparent);
+}
+
+.exam-score-text {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--stage-overlay-text);
+}
+
+.exam-review-btn {
+  width: auto;
+  padding: 0.45rem 0.8rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid var(--stage-overlay-border);
+  color: var(--stage-overlay-text-dim);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+/* Enabled the moment 10 questions have been answered (this document's own
+   "after the tenth, or after more than ten" review facility) — before that
+   it still works (nothing stops an early look back), just without the
+   attention-drawing accent treatment. */
+.exam-review-btn.ready {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.exam-review-btn:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.exam-question {
+  animation: sign-card-fade-in 0.2s ease;
+}
+
+.exam-question-meta {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--stage-overlay-text-dim);
+  margin-bottom: 0.35rem;
+}
+
+.exam-question-text {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--stage-overlay-text);
+  margin-bottom: 0.3rem;
+}
+
+.exam-question-hint {
+  font-size: 0.72rem;
+  color: var(--stage-overlay-text-dim);
+  margin-bottom: 0.8rem;
+}
+
+.exam-question-icon {
+  width: 72px;
+  height: 72px;
+  margin-bottom: 0.7rem;
+}
+
+.exam-question-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.exam-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-bottom: 1rem;
+}
+
+.exam-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 10px;
+  border: 1px solid var(--stage-overlay-border);
+  background: color-mix(in srgb, var(--stage-overlay-text) 4%, transparent);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.exam-option:hover {
+  border-color: var(--accent);
+}
+
+.exam-option input {
+  margin-top: 0.15rem;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+.exam-option-text {
+  font-size: 0.88rem;
+  line-height: 1.4;
+  color: var(--stage-overlay-text);
+}
+
+/* Post-submit states — added alongside the existing border/background so a
+   colorblind user isn't relying on color alone: the ✓/✗ glyph on
+   .exam-option-mark carries the same information. */
+.exam-option.correct {
+  border-color: #22c55e;
+  background: color-mix(in srgb, #22c55e 15%, transparent);
+}
+
+.exam-option.incorrect {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.exam-option-mark {
+  margin-left: auto;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.exam-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.exam-actions button {
+  width: auto;
+  padding: 0.55rem 1.1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-radius: 8px;
+  background: var(--accent);
+  border: none;
+  color: #fff;
+  cursor: pointer;
+}
+
+.exam-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.exam-feedback {
+  margin-top: 0.9rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid var(--stage-overlay-border);
+  background: color-mix(in srgb, var(--stage-overlay-text) 5%, transparent);
+  animation: sign-card-fade-in 0.2s ease;
+}
+
+.exam-feedback-result {
+  font-size: 0.92rem;
+  font-weight: 700;
+  margin-bottom: 0.4rem;
+}
+
+.exam-feedback-result.correct {
+  color: #22c55e;
+}
+
+.exam-feedback-result.incorrect {
+  color: var(--danger);
+}
+
+.exam-feedback-explanation {
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--stage-overlay-text-dim);
+  margin-bottom: 0.8rem;
+}
+
+/* ── Review view ───────────────────────────────────────────────────────── */
+
+.exam-review-summary {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--stage-overlay-text);
+  margin-bottom: 0.9rem;
+}
+
+.exam-review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.exam-review-item {
+  padding: 0.7rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid var(--stage-overlay-border);
+  background: color-mix(in srgb, var(--stage-overlay-text) 4%, transparent);
+}
+
+.exam-review-item.correct {
+  border-left: 3px solid #22c55e;
+}
+
+.exam-review-item.incorrect {
+  border-left: 3px solid var(--danger);
+}
+
+.exam-review-question {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--stage-overlay-text);
+  margin-bottom: 0.35rem;
+}
+
+.exam-review-answer {
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--stage-overlay-text-dim);
+}
+
+.exam-review-answer strong {
+  color: var(--stage-overlay-text);
+}
+
+.exam-back-btn {
+  width: auto;
+  margin-top: 1rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid var(--stage-overlay-border);
+  color: var(--stage-overlay-text);
+  cursor: pointer;
+}
+
+/* ── Market watchlist panel (Equity Analyst persona) ──────────────────────
+   Header/footer chrome reuses the same tokens as #sign-panel/#exam-panel;
+   only list/detail content is new here. See renderMarketList() and
+   openStockDetail() in app.js for what gets injected into
+   #market-panel-body. */
+
+.market-panel-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.65rem 0.9rem;
+  border-bottom: 1px solid var(--stage-overlay-border);
+  background: color-mix(in srgb, var(--stage-overlay-text) 3%, transparent);
+}
+
+.market-panel-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--stage-overlay-text);
+}
+
+.market-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.85rem;
+}
+
+.market-group-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--stage-overlay-text-dim);
+  padding: 0.5rem 0.3rem 0.35rem;
+}
+
+.market-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.55rem 0.6rem;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--stage-overlay-text);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.market-row:hover {
+  background: color-mix(in srgb, var(--stage-overlay-text) 6%, transparent);
+}
+
+.market-row-name {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.market-row-symbol {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.market-row-company {
+  font-size: 0.7rem;
+  color: var(--stage-overlay-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.market-row-price {
+  flex-shrink: 0;
+  text-align: right;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.market-row-change {
+  display: block;
+  font-size: 0.68rem;
+}
+
+.market-row-change.up {
+  color: #22c55e;
+}
+
+.market-row-change.down {
+  color: var(--danger);
+}
+
+.market-row-price-unavailable {
+  font-size: 0.68rem;
+  color: var(--stage-overlay-text-dim);
+  font-style: italic;
+}
+
+.market-notice {
+  padding: 0.7rem 0.8rem;
+  margin-bottom: 0.7rem;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--stage-overlay-border));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--stage-overlay-text);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+/* ── Stock detail ("bigger display") ──────────────────────────────────── */
+
+.market-detail-back {
+  width: auto;
+  margin-bottom: 0.8rem;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid var(--stage-overlay-border);
+  color: var(--stage-overlay-text);
+  cursor: pointer;
+}
+
+.market-detail-header {
+  margin-bottom: 0.9rem;
+}
+
+.market-detail-symbol {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--stage-overlay-text);
+}
+
+.market-detail-company {
+  font-size: 0.85rem;
+  color: var(--stage-overlay-text-dim);
+  margin-bottom: 0.6rem;
+}
+
+.market-detail-price-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.market-detail-price {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--stage-overlay-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.market-detail-change {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.market-detail-asof {
+  font-size: 0.7rem;
+  color: var(--stage-overlay-text-dim);
+  margin-top: 0.3rem;
+}
+
+.market-stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+  margin: 1rem 0;
+}
+
+.market-stat {
+  padding: 0.65rem 0.8rem;
+  border-radius: 10px;
+  border: 1px solid var(--stage-overlay-border);
+  background: color-mix(in srgb, var(--stage-overlay-text) 4%, transparent);
+}
+
+.market-stat-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--stage-overlay-text-dim);
+  margin-bottom: 0.25rem;
+}
+
+.market-stat-value {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--stage-overlay-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.market-load-prices-btn {
+  width: auto;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border-radius: 8px;
+  background: var(--accent);
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  margin-bottom: 0.8rem;
+}
+
+.market-load-prices-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.market-section-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--stage-overlay-text);
+  margin: 1.1rem 0 0.6rem;
+}
+
+.market-news-item {
+  padding: 0.7rem 0.8rem;
+  margin-bottom: 0.6rem;
+  border-radius: 10px;
+  border: 1px solid var(--stage-overlay-border);
+  background: color-mix(in srgb, var(--stage-overlay-text) 4%, transparent);
+}
+
+.market-news-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--stage-overlay-text);
+  text-decoration: none;
+}
+
+.market-news-title:hover {
+  text-decoration: underline;
+}
+
+.market-news-meta {
+  font-size: 0.68rem;
+  color: var(--stage-overlay-text-dim);
+  margin-top: 0.3rem;
+}
+
+/* ── Animated Equity Charts & Visuals ──────────────────────────────────── */
+
+.market-detail-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.market-live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, #10b981 16%, transparent);
+  color: #10b981;
+  border: 1px solid color-mix(in srgb, #10b981 35%, transparent);
+}
+
+.live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  animation: pulse-live-dot 1.5s infinite ease-in-out;
+}
+
+.market-chart-container {
+  margin: 0.85rem 0 1rem;
+  padding: 0.85rem;
+  border-radius: 12px;
+  border: 1px solid var(--stage-overlay-border);
+  background: color-mix(in srgb, var(--stage-overlay-text) 4%, transparent);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.market-chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.market-chart-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--stage-overlay-text-dim);
+}
+
+.market-chart-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+}
+
+.market-chart-badge.up {
+  background: color-mix(in srgb, #10b981 18%, transparent);
+  color: #10b981;
+  border: 1px solid color-mix(in srgb, #10b981 35%, transparent);
+}
+
+.market-chart-badge.down {
+  background: color-mix(in srgb, #ef4444 18%, transparent);
+  color: #ef4444;
+  border: 1px solid color-mix(in srgb, #ef4444 35%, transparent);
+}
+
+/* SVG Chart Animation and Styling */
+@keyframes draw-chart-line {
+  0% {
+    stroke-dashoffset: 1000;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes fade-chart-area {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes pulse-price-dot {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.35);
+  }
+}
+
+@keyframes pulse-live-dot {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+}
+
+.chart-line-anim {
+  stroke-dasharray: 1000;
+  stroke-dashoffset: 1000;
+  animation: draw-chart-line 1.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.chart-area-anim {
+  opacity: 0;
+  animation: fade-chart-area 0.9s ease-out 0.3s forwards;
+}
+
+.chart-dot-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pulse-price-dot 2.2s ease-in-out infinite;
+}
+
+.chart-dot-ring {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pulse-price-dot 2.2s ease-in-out infinite reverse;
+}
+
+.market-chart-overlay-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.market-chart-lbl {
+  position: absolute;
+  font-size: 0.65rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--stage-overlay-text-dim);
+  right: 6px;
+}
+
+.market-chart-lbl.max-lbl {
+  top: 4px;
+}
+
+.market-chart-lbl.min-lbl {
+  bottom: 4px;
+}
+
+.market-chart-badge-price {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #ffffff;
+  padding: 2px 7px;
+  border-radius: 5px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Theater mode (compact avatar / "bigger display" for the side panel) ──
+   Shrinks the presenter into a small corner box instead of filling the
+   stage, so a docked panel effectively becomes the main event. Requested
+   specifically with an outdoor background — toggling this on relaunches the
+   presenter onto the Outdoor scene if it isn't already there (see
+   toggleTheaterMode() in app.js; the SDK has no way to swap just the scene
+   without a full initializeWithConnectKey() reload, same constraint noted
+   on the Face-framing and persona-preset code above). */
+
+.stage.theater-mode sv-presenter,
+.stage.theater-mode #stage-placeholder {
+  /* !important on size: sv-presenter carries an inline
+     style="width:100%;height:100%" in index.html (needed for its normal
+     full-stage fill), which otherwise beats any external stylesheet rule
+     regardless of selector specificity. */
+  position: absolute !important;
+  width: 230px !important;
+  height: 230px !important;
+  left: 1rem;
+  bottom: 1rem;
+  top: auto;
+  right: auto;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  border: 2px solid var(--stage-overlay-border);
+  z-index: 20;
+  transform: none !important;
+}
+
+.stage.theater-mode .stage-toolbar {
+  left: 1rem;
+  right: auto;
+  width: 230px;
 }
 
 /* ── Stage ─────────────────────────────────────────────────────────────── */
@@ -1522,6 +2705,120 @@ sv-presenter.framing-face {
   border-bottom-left-radius: 3px;
 }
 
+.chat-msg.has-card {
+  max-width: 92%;
+}
+
+.chat-msg-text {
+  margin-bottom: 0.5rem;
+  line-height: 1.45;
+}
+
+.chat-equity-card {
+  margin-top: 0.5rem;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+}
+
+.chat-equity-inner {
+  padding: 0.75rem 0.85rem;
+}
+
+.chat-equity-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.45rem;
+  gap: 0.5rem;
+}
+
+.chat-equity-id {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.chat-equity-sym {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.chat-equity-name {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.chat-equity-price-box {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.chat-equity-price {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-equity-change {
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-equity-chart-box {
+  margin: 0.35rem 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-deep) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  overflow: hidden;
+}
+
+.chat-equity-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.45rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  font-size: 0.68rem;
+  color: var(--text-dim);
+}
+
+.chat-equity-stats {
+  display: flex;
+  gap: 0.6rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-equity-view-btn {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  color: var(--accent);
+  padding: 0.2rem 0.55rem;
+  border-radius: 5px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.chat-equity-view-btn:hover {
+  background: var(--accent);
+  color: #ffffff;
+}
+
 /* ── Persona buttons ───────────────────────────────────────────────────── */
 
 .persona-buttons,
@@ -1577,6 +2874,47 @@ sv-presenter.framing-face {
 .persona-chip:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* Equity Analyst-only — shown/hidden by setActivePersona() in app.js. Two
+   full-width buttons (market watchlist + theater mode) stacked below the
+   persona row, same idiom as .exam-start-btn below. */
+.equity-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+/* Driving Instruction-only — shown/hidden by setActivePersona() in app.js,
+   same gating as the sign panel itself. */
+.exam-start-btn {
+  width: 100%;
+  flex-shrink: 0;
+  margin-top: 0.4rem;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-deep));
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--accent);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.equity-controls .exam-start-btn {
+  margin-top: 0;
+}
+
+#theater-mode-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.exam-start-btn:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
 }
 
 /* ── Chat input row ────────────────────────────────────────────────────── */
